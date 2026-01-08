@@ -14,10 +14,15 @@ export class ConfigWatcher {
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map()
 
   private prevSettings?: string
+  private isSyncingExtensions: boolean = false
 
   constructor(ctx: ExtensionContext, recorder: MetaRecorder) {
     this.ctx = ctx
     this.recorder = recorder
+  }
+
+  setSyncingExtensions(value: boolean) {
+    this.isSyncingExtensions = value
   }
 
   async start() {
@@ -72,6 +77,12 @@ export class ConfigWatcher {
 
   private watchExtensions() {
     const extensionsChangeDisposable = extensions.onDidChange(() => {
+      // Skip sync if we're currently syncing extensions
+      if (this.isSyncingExtensions) {
+        logger.info('Extensions changed, but skipping sync (currently syncing extensions)')
+        return
+      }
+
       this.debounceSync('extensions', async () => {
         try {
           logger.info('Extensions changed, syncing to storage...')

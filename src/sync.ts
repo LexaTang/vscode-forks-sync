@@ -1,6 +1,6 @@
 import type { ExtensionContext } from 'vscode'
 import type { MetaRecorder } from './recorder'
-import type { ExtensionRecommendations, SyncCommandOptions } from './types'
+import type { ExtensionRecommendations, SyncCommandContext } from './types'
 import { window } from 'vscode'
 import { codeName, config } from './config'
 import { displayName } from './generated/meta'
@@ -9,7 +9,7 @@ import { getExtensions, getExtensionsPath, getKeybindings, getSettings, setExten
 import { ensureStorageDirectory, getStorageFileUri, readStorageFile, storageFileExists, writeStorageFile } from './storage'
 import { findConfigFile, logger } from './utils'
 
-export async function syncProfile(ctx: ExtensionContext, recorder: MetaRecorder, options: SyncCommandOptions = {}) {
+export async function syncProfile(ctx: ExtensionContext, recorder: MetaRecorder, options: SyncCommandContext = {}) {
   const { prompt = true, silent = false } = options
 
   let shouldSync = true
@@ -40,7 +40,7 @@ export async function syncProfile(ctx: ExtensionContext, recorder: MetaRecorder,
   }
 }
 
-export async function syncSettings(_ctx: ExtensionContext, recorder: MetaRecorder, options: SyncCommandOptions = {}) {
+export async function syncSettings(_ctx: ExtensionContext, recorder: MetaRecorder, options: SyncCommandContext = {}) {
   const { silent = false } = options
   const settingsPath = await findConfigFile(codeName, 'settings.json')
   if (!settingsPath) {
@@ -76,7 +76,7 @@ export async function syncSettings(_ctx: ExtensionContext, recorder: MetaRecorde
     window.showInformationMessage(`${displayName}: Settings updated`)
 }
 
-export async function syncKeybindings(_ctx: ExtensionContext, recorder: MetaRecorder, options: SyncCommandOptions = {}) {
+export async function syncKeybindings(_ctx: ExtensionContext, recorder: MetaRecorder, options: SyncCommandContext = {}) {
   const { silent = false } = options
   const keybindingsPath = await findConfigFile(codeName, 'keybindings.json')
   if (!keybindingsPath) {
@@ -112,7 +112,7 @@ export async function syncKeybindings(_ctx: ExtensionContext, recorder: MetaReco
     window.showInformationMessage(`${displayName}: Keybindings updated`)
 }
 
-export async function syncExtensions(_ctx: ExtensionContext, recorder: MetaRecorder, options: SyncCommandOptions = {}) {
+export async function syncExtensions(_ctx: ExtensionContext, recorder: MetaRecorder, options: SyncCommandContext = {}) {
   const { prompt = true, silent = false } = options
   const hasStorage = await storageFileExists('extensions.json')
   if (!hasStorage) {
@@ -129,7 +129,7 @@ export async function syncExtensions(_ctx: ExtensionContext, recorder: MetaRecor
 
   const extensionsPath = getExtensionsPath()
   if (!extensionsPath) {
-    await setExtensions(extConfig.recommendations, prompt)
+    await setExtensions(extConfig.recommendations, prompt, options.configWatcher)
     return
   }
 
@@ -137,7 +137,7 @@ export async function syncExtensions(_ctx: ExtensionContext, recorder: MetaRecor
   const result = await recorder.compareMtime('extensions', storageUri.fsPath, extensionsPath)
 
   if (result === 1) {
-    await setExtensions(extConfig.recommendations, prompt)
+    await setExtensions(extConfig.recommendations, prompt, options.configWatcher)
   }
   else if (result === -1) {
     const content = updateExtensionRecommendations(extensions, await getExtensions())

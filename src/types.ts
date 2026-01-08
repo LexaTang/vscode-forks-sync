@@ -1,12 +1,14 @@
 import type { EDITOR_CONFIG_NAME_MAP } from './constants'
+import type { ConfigWatcher } from './watcher'
 
 export type AppName = keyof typeof EDITOR_CONFIG_NAME_MAP
 
 export type SyncType = 'settings' | 'extensions' | 'keybindings'
 
-export interface SyncCommandOptions {
+export interface SyncCommandContext {
   prompt?: boolean
   silent?: boolean
+  configWatcher?: ConfigWatcher
 }
 
 export interface ExtensionsDiff {

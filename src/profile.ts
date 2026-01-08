@@ -1,5 +1,6 @@
 import type { Extension } from 'vscode'
 import type { ExtensionConfig, ExtensionsDiff } from './types'
+import type { ConfigWatcher } from './watcher'
 import { Buffer } from 'node:buffer'
 import { dirname, join } from 'node:path'
 import { commands, extensions, ProgressLocation, Uri, window, workspace } from 'vscode'
@@ -112,7 +113,7 @@ export async function getExtensions(): Promise<string[]> {
   return normalizeExtensions(await getUserExtensions())
 }
 
-export async function setExtensions(exts: string[], prompt: boolean = true) {
+export async function setExtensions(exts: string[], prompt: boolean = true, watcher?: ConfigWatcher) {
   const diff = await getExtensionsDiff(exts)
   if (!diff)
     return
@@ -156,116 +157,138 @@ export async function setExtensions(exts: string[], prompt: boolean = true) {
     }
   }
 
+  // Disable extension watcher during installation/uninstallation
+  if (watcher)
+    watcher.setSyncingExtensions(true)
+
+  try {
+    let needsReload: boolean = false
+    const failedToInstall: string[] = []
+
+    await window.withProgress(
+      {
+        location: ProgressLocation.Notification,
+        title: 'Syncing Extensions',
+        cancellable: false,
+      },
+      async (progress) => {
+        const total = toInstall.length + toDelete.length
+        let completed = 0
+
+        for (const id of toDelete) {
+          try {
+            progress.report({
+              message: `Uninstalling ${id}...`,
+              increment: (++completed / total) * 100,
+            })
+            await commands.executeCommand(
+              'workbench.extensions.uninstallExtension',
+              id,
+            )
+            needsReload = true
+            logger.info(`Uninstalled extension: ${id}`)
+          }
+          catch (error) {
+            logger.error(`Failed to uninstall ${id}`, error)
+          }
+        }
+
+        for (const id of toInstall) {
+          try {
+            progress.report({
+              message: `Installing ${id}...`,
+              increment: (++completed / total) * 100,
+            })
+            await commands.executeCommand('workbench.extensions.installExtension', id)
+            needsReload = true
+            logger.info(`Installed extension: ${id}`)
+          }
+          catch (error) {
+            failedToInstall.push(id)
+            logger.error(`Failed to install ${id}`, error)
+          }
+        }
+      },
+    )
+
+    if (failedToInstall.length > 0) {
+      const result = await window.showWarningMessage(
+        formatMessage('Failed to install:', failedToInstall),
+        { modal: true },
+        'Install from Marketplace',
+      )
+
+      if (result === 'Install from Marketplace')
+        needsReload = await installExtensionFromMarketplace(failedToInstall, watcher)
+    }
+
+    if (needsReload) {
+      const reload = await window.showInformationMessage(
+        formatMessage('Extension sync complete. Reload window to apply all changes?'),
+        'Reload',
+        'Later',
+      )
+      if (reload === 'Reload')
+        await commands.executeCommand('workbench.action.reloadWindow')
+    }
+  }
+  finally {
+    // Re-enable extension watcher
+    if (watcher)
+      watcher.setSyncingExtensions(false)
+  }
+}
+
+export async function installExtensionFromMarketplace(ids: string[], watcher?: ConfigWatcher) {
   let needsReload: boolean = false
   const failedToInstall: string[] = []
 
-  await window.withProgress(
-    {
+  // Disable extension watcher during installation
+  if (watcher)
+    watcher.setSyncingExtensions(true)
+
+  try {
+    await window.withProgress({
       location: ProgressLocation.Notification,
-      title: 'Syncing Extensions',
+      title: 'Installing Extensions',
       cancellable: false,
-    },
-    async (progress) => {
-      const total = toInstall.length + toDelete.length
+    }, async (progress) => {
+      const total = ids.length
       let completed = 0
 
-      for (const id of toDelete) {
-        try {
-          progress.report({
-            message: `Uninstalling ${id}...`,
-            increment: (++completed / total) * 100,
-          })
-          await commands.executeCommand(
-            'workbench.extensions.uninstallExtension',
-            id,
-          )
-          needsReload = true
-          logger.info(`Uninstalled extension: ${id}`)
-        }
-        catch (error) {
-          logger.error(`Failed to uninstall ${id}`, error)
-        }
-      }
-
-      for (const id of toInstall) {
+      for (const id of ids) {
         try {
           progress.report({
             message: `Installing ${id}...`,
             increment: (++completed / total) * 100,
           })
-          await commands.executeCommand('workbench.extensions.installExtension', id)
+          const uri = await downloadVsixPackage(id)
+          try {
+            await commands.executeCommand('workbench.extensions.installExtension', uri)
+          }
+          finally {
+            await workspace.fs.delete(uri, { useTrash: false })
+          }
           needsReload = true
-          logger.info(`Installed extension: ${id}`)
         }
         catch (error) {
           failedToInstall.push(id)
-          logger.error(`Failed to install ${id}`, error)
+          logger.error(`Failed to install ${id} from VS Code Marketplace`, error)
+          continue
         }
       }
-    },
-  )
+    })
 
-  if (failedToInstall.length > 0) {
-    const result = await window.showWarningMessage(
-      formatMessage('Failed to install:', failedToInstall),
-      { modal: true },
-      'Install from Marketplace',
-    )
+    if (failedToInstall.length > 0)
+      window.showErrorMessage(formatMessage('Failed to install:', failedToInstall), { modal: true })
 
-    if (result === 'Install from Marketplace')
-      needsReload = await installExtensionFromMarketplace(failedToInstall)
+    return needsReload
   }
-
-  if (needsReload) {
-    const reload = await window.showInformationMessage(
-      formatMessage('Extension sync complete. Reload window to apply all changes?'),
-      'Reload',
-      'Later',
-    )
-    if (reload === 'Reload')
-      await commands.executeCommand('workbench.action.reloadWindow')
+  finally {
+    // Re-enable extension watcher
+    if (watcher)
+      watcher.setSyncingExtensions(false)
   }
-}
-
-export async function installExtensionFromMarketplace(ids: string[]) {
-  let needsReload: boolean = false
-  const failedToInstall: string[] = []
-
-  await window.withProgress({
-    location: ProgressLocation.Notification,
-    title: 'Installing Extensions',
-    cancellable: false,
-  }, async (progress) => {
-    const total = ids.length
-    let completed = 0
-
-    for (const id of ids) {
-      try {
-        progress.report({
-          message: `Installing ${id}...`,
-          increment: (++completed / total) * 100,
-        })
-        const uri = await downloadVsixPackage(id)
-        try {
-          await commands.executeCommand('workbench.extensions.installExtension', uri)
-        }
-        finally {
-          await workspace.fs.delete(uri, { useTrash: false })
-        }
-        needsReload = true
-      }
-      catch (error) {
-        failedToInstall.push(id)
-        logger.error(`Failed to install ${id} from VS Code Marketplace`, error)
-        continue
-      }
-    }
-  })
-
-  if (failedToInstall.length > 0)
-    window.showErrorMessage(formatMessage('Failed to install:', failedToInstall), { modal: true })
-
-  return needsReload
 }
 
 export function getExtensionsPath(): string | undefined {

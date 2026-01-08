@@ -8,16 +8,16 @@ import { ConfigWatcher } from './watcher'
 
 const { activate, deactivate } = defineExtension(async (ctx: ExtensionContext) => {
   const recorder = new MetaRecorder()
+  const configWatcher = new ConfigWatcher(ctx, recorder)
 
-  commands.registerCommand('octohash.crosside-sync.syncProfile', () => syncProfile(ctx, recorder, { prompt: false }))
+  commands.registerCommand('octohash.crosside-sync.syncProfile', () => syncProfile(ctx, recorder, { prompt: false, configWatcher }))
   commands.registerCommand('octohash.crosside-sync.syncSettings', () => syncSettings(ctx, recorder))
   commands.registerCommand('octohash.crosside-sync.syncKeybindings', () => syncKeybindings(ctx, recorder))
-  commands.registerCommand('octohash.crosside-sync.syncExtensions', () => syncExtensions(ctx, recorder, { prompt: config.promptOnExtensionSync }))
+  commands.registerCommand('octohash.crosside-sync.syncExtensions', () => syncExtensions(ctx, recorder, { prompt: config.promptOnExtensionSync, configWatcher }))
 
   if (config.autoSync)
     syncProfile(ctx, recorder, { prompt: config.promptOnAutoSync, silent: !config.promptOnAutoSync })
 
-  const configWatcher = new ConfigWatcher(ctx, recorder)
   await configWatcher.start()
 
   ctx.subscriptions.push({
