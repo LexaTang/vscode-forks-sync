@@ -1,30 +1,30 @@
 packages: []
 catalogs:
   build:
-    tsdown: ^0.16.3
+    tsdown: ^0.18.4
   cli:
-    '@vscode/vsce': ^3.7.0
-    bumpp: ^10.3.1
-    pncat: ^0.7.5
-    taze: ^19.9.0
+    '@vscode/vsce': ^3.7.1
+    bumpp: ^10.3.2
+    pncat: ^0.7.8
+    taze: ^19.9.2
   lint:
-    '@antfu/eslint-config': ^6.2.0
-    eslint: ^9.39.1
-    lint-staged: ^16.2.6
+    '@antfu/eslint-config': ^6.7.3
+    eslint: ^9.39.2
+    lint-staged: ^16.2.7
     simple-git-hooks: ^2.13.1
   network:
     ofetch: ^1.5.1
   test:
-    vitest: ^4.0.8
+    vitest: ^4.0.16
   tsc:
     typescript: ^5.9.3
   types:
-    '@types/node': ^24.10.1
+    '@types/node': ^25.0.3
   utils:
-    comment-json: ^4.4.1
+    comment-json: ^4.5.1
   vscode:
     reactive-vscode: ^0.4.1
-    vscode-ext-gen: ^1.4.0
+    vscode-ext-gen: ^1.5.1
 onlyBuiltDependencies:
   - esbuild
   - simple-git-hooks
