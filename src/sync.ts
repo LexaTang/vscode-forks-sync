@@ -54,14 +54,45 @@ async function confirmSettingsPull(overriddenKeys: string[]): Promise<boolean> {
   if (!Number.isFinite(threshold) || threshold < 1 || overriddenKeys.length < threshold)
     return true
 
-  const result = await window.showWarningMessage(
-    `${displayName}: applying sync will overwrite ${overriddenKeys.length} settings keys on this IDE. Continue?`,
-    { modal: true },
-    'Continue',
-    'Cancel',
-  )
+  while (true) {
+    const result = await window.showWarningMessage(
+      `${displayName}: applying sync will overwrite ${overriddenKeys.length} settings keys on this IDE. Continue?`,
+      { modal: true },
+      'Continue',
+      'Review Details',
+      'Cancel',
+    )
 
-  return result === 'Continue'
+    if (result === 'Continue') {
+      return true
+    }
+    else if (result === 'Review Details') {
+      const details = [
+        `# ${displayName} - Settings Sync Details\n`,
+        `The following ${overriddenKeys.length} keys will be modified or overwritten by the incoming sync:\n`,
+        ...overriddenKeys.sort().map(k => `• \`${k}\``),
+        '',
+      ]
+
+      const { workspace: ws } = await import('vscode')
+      const doc = await ws.openTextDocument({
+        content: details.join('\n'),
+        language: 'markdown',
+      })
+      await window.showTextDocument(doc)
+
+      const finalResult = await window.showInformationMessage(
+        'Review the settings changes. Do you want to continue?',
+        'Continue',
+      )
+      if (finalResult === 'Continue')
+        return true
+      // If they cancel or dismiss, loop back to the modal prompt
+    }
+    else {
+      return false
+    }
+  }
 }
 
 async function getMergedSettingsFromSnapshots(recorder: MetaRecorder): Promise<Record<string, unknown>> {
