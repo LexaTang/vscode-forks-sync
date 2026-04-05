@@ -6,7 +6,7 @@ import { Uri, workspace } from 'vscode'
 import { displayName } from './generated/meta'
 
 import { appendFile, mkdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { config } from './config'
 
 let _baseLogger: ReturnType<typeof useLogger> | undefined
@@ -71,6 +71,17 @@ export async function findConfigFile(ctx: ExtensionContext, file: string): Promi
     logger.warn(`Could not find ${file} at API location: ${path}`)
     return undefined
   }
+}
+
+/**
+ * Like findConfigFile but always returns the expected path without checking existence.
+ * Also ensures the parent directory exists so callers can write a new file there.
+ */
+export async function resolveConfigFilePath(ctx: ExtensionContext, file: string): Promise<string> {
+  const userDir = Uri.joinPath(ctx.globalStorageUri, '../../').fsPath
+  const path = join(userDir, file)
+  await workspace.fs.createDirectory(Uri.file(dirname(path)))
+  return path
 }
 
 export function resolvePathUri(path: string): Uri {

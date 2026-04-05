@@ -32,7 +32,7 @@ import {
   writeSettingsSnapshot,
   writeStorageFile,
 } from './storage'
-import { findConfigFile, logger } from './utils'
+import { findConfigFile, logger, resolveConfigFilePath } from './utils'
 
 async function runWithSuppressedWrite(
   type: 'settings' | 'keybindings',
@@ -140,18 +140,35 @@ export async function syncSettings(
 ): Promise<void> {
   const { silent = false } = options
   const currentIde = env.appName as AppName
-  const settingsPath = await findConfigFile(ctx, 'settings.json')
-
-  if (!settingsPath) {
-    logger.error('Settings file not found')
-    if (!silent)
-      window.showInformationMessage(`${displayName}: Settings file not found`)
-    return
-  }
+  let settingsPath = await findConfigFile(ctx, 'settings.json')
 
   await ensureStorageDirectory()
 
-  const localRaw = await getSettings(settingsPath)
+  if (!settingsPath) {
+    const hasStorage = await storageFileExists('settings.json')
+    if (hasStorage) {
+      // Create the local file and pull from storage
+      const path = await resolveConfigFilePath(ctx, 'settings.json')
+      const raw = await readStorageFile('settings.json')
+      await setSettings(path, raw, { backup: false })
+      await recorder.updateMtime('settings')
+      logger.info(`Settings: local file missing, created from storage at ${path}`)
+      if (!silent)
+        window.showInformationMessage(`${displayName}: Settings restored from storage`)
+      return
+    }
+    else {
+      // No local file and no storage — create empty local file and initialize
+      const path = await resolveConfigFilePath(ctx, 'settings.json')
+      await setSettings(path, '{}', { backup: false })
+      settingsPath = path
+      logger.info(`Settings: local file missing, created empty at ${path}`)
+    }
+  }
+
+  // At this point settingsPath is guaranteed to be set (either found or just created)
+  const resolvedSettingsPath: string = settingsPath!
+  const localRaw = await getSettings(resolvedSettingsPath)
   const localSettings = parseSettings(localRaw)
   const filteredLocal = filterSettingsKeys(localSettings)
   const mergeMode = (config['settings.mergeMode'] as string) ?? 'merge'
@@ -168,7 +185,7 @@ export async function syncSettings(
   }
 
   const storageUri = getStorageFileUri('settings.json')
-  const syncDirection = await recorder.compareMtime('settings', storageUri.fsPath, settingsPath)
+  const syncDirection = await recorder.compareMtime('settings', storageUri.fsPath, resolvedSettingsPath)
 
   if (syncDirection === 1) {
     const mergedResult = mergeMode === 'merge'
@@ -181,7 +198,7 @@ export async function syncSettings(
     const nextRaw = stringifySettings(mergedResult.syncedSettings)
     if (nextRaw !== localRaw) {
       await runWithSuppressedWrite('settings', nextRaw, async () => {
-        await setSettings(settingsPath, nextRaw)
+        await setSettings(settingsPath!, nextRaw)
       }, options)
     }
 
@@ -209,20 +226,38 @@ export async function syncKeybindings(
   options: SyncCommandContext = {},
 ): Promise<void> {
   const { silent = false } = options
-  const keybindingsPath = await findConfigFile(ctx, 'keybindings.json')
-
-  if (!keybindingsPath) {
-    logger.error('Keybindings file not found')
-    if (!silent)
-      window.showInformationMessage(`${displayName}: Keybindings file not found`)
-    return
-  }
+  let keybindingsPath = await findConfigFile(ctx, 'keybindings.json')
 
   await ensureStorageDirectory()
 
+  if (!keybindingsPath) {
+    const hasStorage = await storageFileExists('keybindings.json')
+    if (hasStorage) {
+      // Create the local file and pull from storage
+      const path = await resolveConfigFilePath(ctx, 'keybindings.json')
+      const raw = await readStorageFile('keybindings.json')
+      await setKeybindings(path, raw, { backup: false })
+      await recorder.updateMtime('keybindings')
+      logger.info(`Keybindings: local file missing, created from storage at ${path}`)
+      if (!silent)
+        window.showInformationMessage(`${displayName}: Keybindings restored from storage`)
+      return
+    }
+    else {
+      // No local file and no storage — create empty local file and initialize
+      const path = await resolveConfigFilePath(ctx, 'keybindings.json')
+      await setKeybindings(path, '[]', { backup: false })
+      keybindingsPath = path
+      logger.info(`Keybindings: local file missing, created empty at ${path}`)
+    }
+  }
+
+  // At this point keybindingsPath is guaranteed to be set (either found or just created)
+  const resolvedKeybindingsPath: string = keybindingsPath!
+
   const hasStorage = await storageFileExists('keybindings.json')
   if (!hasStorage) {
-    const raw = await getKeybindings(keybindingsPath)
+    const raw = await getKeybindings(resolvedKeybindingsPath)
     await writeStorageFile('keybindings.json', raw)
     await recorder.updateMtime('keybindings')
     if (!silent)
@@ -232,18 +267,18 @@ export async function syncKeybindings(
   }
 
   const storageUri = getStorageFileUri('keybindings.json')
-  const syncDirection = await recorder.compareMtime('keybindings', storageUri.fsPath, keybindingsPath)
+  const syncDirection = await recorder.compareMtime('keybindings', storageUri.fsPath, resolvedKeybindingsPath)
 
   if (syncDirection === 1) {
     const raw = await readStorageFile('keybindings.json')
     await runWithSuppressedWrite('keybindings', raw, async () => {
-      await setKeybindings(keybindingsPath, raw)
+      await setKeybindings(resolvedKeybindingsPath, raw)
     }, options)
     await recorder.updateMtime('keybindings')
     logger.info('Keybindings: pulled from storage')
   }
   else if (syncDirection === -1) {
-    await writeStorageFile('keybindings.json', await getKeybindings(keybindingsPath))
+    await writeStorageFile('keybindings.json', await getKeybindings(resolvedKeybindingsPath))
     await recorder.updateMtime('keybindings')
     logger.info('Keybindings: pushed to storage')
   }
