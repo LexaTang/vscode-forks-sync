@@ -7,7 +7,8 @@ import { commands, extensions, ProgressLocation, Uri, window, workspace } from '
 import { config } from './config'
 import { DEFAULT_EXTENSIONS_GALLERY } from './constants'
 import { downloadVsixPackage } from './downloader'
-import { displayName, extensionId } from './generated/meta'
+import { extensionId } from './generated/meta'
+import { t } from './i18n'
 import { jsonParse, jsonStringify } from './json'
 import { readStorageFile, storageFileExists, writeStorageFile } from './storage'
 import { logger, readFile } from './utils'
@@ -150,7 +151,7 @@ export async function getExtensionsDiff(target: string[]): Promise<ExtensionsDif
 }
 
 function formatMessage(title: string, list?: string[]): string {
-  const parts = [displayName, title]
+  const parts = [t('displayName'), title]
   if (list && list.length > 0)
     parts.push(...list.map(e => `• ${e}`))
   return parts.join('\n')
@@ -187,7 +188,7 @@ export async function applyExtensions(
     )
 
     if (action === 'Review Details') {
-      const details: string[] = [`${displayName} - Extension Sync Details\n`]
+      const details: string[] = [`${t('displayName')} - Extension Sync Details\n`]
       if (toInstall.length > 0)
         details.push('Installing:', ...toInstall.map(e => `  • ${e}`), '\n')
       if (toDelete.length > 0)

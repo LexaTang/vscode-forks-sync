@@ -1,11 +1,11 @@
 {
   "publisher": "lexatang",
   "name": "vscode-forks-sync",
-  "displayName": "Fork Sync",
+  "displayName": "%name%",
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@10.27.0",
-  "description": "Synchronize settings, keybindings and extensions across VSCode forks with smart per-key merge strategies.",
+  "description": "%description%",
   "author": "lexatang",
   "license": "MIT",
   "repository": {
@@ -34,67 +34,65 @@
     "LICENSE.md",
     "README.md",
     "dist/*",
+    "package.nls.json",
+    "package.nls.zh-cn.json",
     "res/*"
   ],
   "engines": {
     "vscode": "^1.90.0"
   },
   "activationEvents": [
-    "onStartupFinished",
-    "onCommand:vscode-forks-sync.syncProfile",
-    "onCommand:vscode-forks-sync.syncSettings",
-    "onCommand:vscode-forks-sync.syncKeybindings",
-    "onCommand:vscode-forks-sync.syncExtensions"
+    "onStartupFinished"
   ],
   "contributes": {
     "commands": [
       {
         "command": "vscode-forks-sync.syncProfile",
-        "title": "Sync Everything",
-        "category": "Fork Sync",
+        "title": "%command.syncProfile.title%",
+        "category": "%command.syncProfile.category%",
         "icon": "$(sync)"
       },
       {
         "command": "vscode-forks-sync.syncSettings",
-        "title": "Sync Settings",
-        "category": "Fork Sync",
+        "title": "%command.syncSettings.title%",
+        "category": "%command.syncSettings.category%",
         "icon": "$(settings-gear)"
       },
       {
         "command": "vscode-forks-sync.syncKeybindings",
-        "title": "Sync Keybindings",
-        "category": "Fork Sync",
+        "title": "%command.syncKeybindings.title%",
+        "category": "%command.syncKeybindings.category%",
         "icon": "$(keyboard)"
       },
       {
         "command": "vscode-forks-sync.syncExtensions",
-        "title": "Sync Extensions",
-        "category": "Fork Sync",
+        "title": "%command.syncExtensions.title%",
+        "category": "%command.syncExtensions.category%",
         "icon": "$(extensions)"
       }
     ],
     "configuration": {
       "type": "object",
-      "title": "Fork Sync",
+      "title": "%config.title%",
       "properties": {
         "vscode-forks-sync.storagePath": {
           "type": "string",
-          "description": "The local directory used to store shared sync data between IDE forks.",
+          "description": "%config.storagePath.description%",
           "default": "~/.vscode-forks-sync"
         },
         "vscode-forks-sync.autoSync": {
           "type": "boolean",
-          "description": "Automatically sync on startup.",
+          "description": "%config.autoSync.description%",
           "default": true
         },
         "vscode-forks-sync.promptOnAutoSync": {
           "type": "boolean",
-          "description": "Show a confirmation prompt before auto-syncing on startup.",
+          "description": "%config.promptOnAutoSync.description%",
           "default": true
         },
         "vscode-forks-sync.promptOnExtensionSync": {
           "type": "boolean",
-          "description": "Show a confirmation prompt before applying extension changes.",
+          "description": "%config.promptOnExtensionSync.description%",
           "default": true
         },
         "vscode-forks-sync.settings.mergeMode": {
@@ -104,11 +102,11 @@
             "merge"
           ],
           "enumDescriptions": [
-            "Whole-file override: whichever IDE has the newest file mtime wins entirely.",
-            "Per-key merge: each key is individually resolved to the value last changed by any IDE."
+            "%config.mergeMode.override%",
+            "%config.mergeMode.merge%"
           ],
           "default": "merge",
-          "description": "Strategy for resolving settings.json conflicts across IDEs."
+          "description": "%config.mergeMode.description%"
         },
         "vscode-forks-sync.settings.excludeKeys": {
           "type": "array",
@@ -121,7 +119,7 @@
             "extensions.autoUpdate",
             "vscode-forks-sync.*"
           ],
-          "description": "Settings keys excluded from sync. Supports glob patterns like 'editor.*'. Excluded keys are always kept local."
+          "description": "%config.excludeKeys.description%"
         },
         "vscode-forks-sync.settings.includeKeys": {
           "type": "array",
@@ -129,18 +127,18 @@
             "type": "string"
           },
           "default": [],
-          "description": "Optional settings whitelist. When non-empty, only matching keys participate in sync; all other keys stay local. Supports glob patterns like 'editor.*'."
+          "description": "%config.includeKeys.description%"
         },
         "vscode-forks-sync.settings.pokaYokeThreshold": {
           "type": "number",
           "default": 10,
           "minimum": 1,
-          "description": "Ask for confirmation before applying a settings pull that would overwrite this many synced keys or more."
+          "description": "%config.pokaYokeThreshold.description%"
         },
         "vscode-forks-sync.backupBeforeLocalWrite": {
           "type": "boolean",
           "default": true,
-          "description": "Create a per-IDE backup before writing local settings.json or keybindings.json. Restore is manual."
+          "description": "%config.backupBeforeLocalWrite.description%"
         },
         "vscode-forks-sync.extensions.excludeExtensions": {
           "type": "array",
@@ -148,11 +146,11 @@
             "type": "string"
           },
           "default": [],
-          "description": "Extension IDs excluded from sync. Supports glob patterns and is matched case-insensitively."
+          "description": "%config.excludeExtensions.description%"
         },
         "vscode-forks-sync.extensionsGallery": {
           "type": "object",
-          "description": "Open VSX-compatible gallery used for VSIX lookup. Fork Sync currently uses serviceUrl for Open VSX-style registries and falls back to VS Marketplace.",
+          "description": "%config.extensionsGallery.description%",
           "default": {
             "serviceUrl": "https://open-vsx.org/vscode/gallery",
             "itemUrl": "https://open-vsx.org/vscode/item"

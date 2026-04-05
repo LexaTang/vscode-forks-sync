@@ -2,7 +2,7 @@ import type { ExtensionContext } from 'vscode'
 import { defineExtension } from 'reactive-vscode'
 import { commands, window } from 'vscode'
 import { config } from './config'
-import { displayName } from './generated/meta'
+import { t } from './i18n'
 import { MetaRecorder } from './recorder'
 import { syncExtensions, syncKeybindings, syncProfile, syncSettings } from './sync'
 import { ConfigWatcher } from './watcher'
@@ -21,7 +21,7 @@ const { activate, deactivate } = defineExtension(async (ctx: ExtensionContext) =
       }
       catch (err) {
         logger.error(`Command ${id} failed`, err)
-        window.showErrorMessage(`${displayName}: Command failed: ${err instanceof Error ? err.message : String(err)}`)
+        window.showErrorMessage(`${t('displayName')}: ${t('msg.error.commandFailed', err instanceof Error ? err.message : String(err))}`)
       }
     })
   }

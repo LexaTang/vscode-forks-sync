@@ -11,7 +11,7 @@ import {
   readExtensionStorage,
   writeExtensionStorage,
 } from './extensions'
-import { displayName } from './generated/meta'
+import { t } from './i18n'
 import {
   applySyncedSettings,
   buildMergedSettings,
@@ -56,20 +56,19 @@ async function confirmSettingsPull(overriddenKeys: string[]): Promise<boolean> {
 
   while (true) {
     const result = await window.showWarningMessage(
-      `${displayName}: applying sync will overwrite ${overriddenKeys.length} settings keys on this IDE. Continue?`,
+      `${t('displayName')}: ${t('msg.settings.confirmApply', { count: overriddenKeys.length })}`,
       { modal: true },
-      'Continue',
-      'Review Details',
-      'Cancel',
+      t('msg.settings.continue'),
+      t('msg.settings.reviewDetails'),
+      t('msg.settings.cancel'),
     )
 
-    if (result === 'Continue') {
+    if (result === t('msg.settings.continue')) {
       return true
     }
-    else if (result === 'Review Details') {
+    else if (result === t('msg.settings.reviewDetails')) {
       const details = [
-        `# ${displayName} - Settings Sync Details\n`,
-        `The following ${overriddenKeys.length} keys will be modified or overwritten by the incoming sync:\n`,
+        t('msg.settings.syncDetails', { displayName: t('displayName'), count: overriddenKeys.length }),
         ...overriddenKeys.sort().map(k => `• \`${k}\``),
         '',
       ]
@@ -82,10 +81,10 @@ async function confirmSettingsPull(overriddenKeys: string[]): Promise<boolean> {
       await window.showTextDocument(doc)
 
       const finalResult = await window.showInformationMessage(
-        'Review the settings changes. Do you want to continue?',
-        'Continue',
+        t('msg.settings.confirmReview'),
+        t('msg.settings.continue'),
       )
-      if (finalResult === 'Continue')
+      if (finalResult === t('msg.settings.continue'))
         return true
       // If they cancel or dismiss, loop back to the modal prompt
     }
@@ -138,11 +137,11 @@ export async function syncProfile(
   let shouldSync = true
   if (prompt) {
     const result = await window.showInformationMessage(
-      `${displayName}: Do you want to sync your config?`,
-      'Sync',
-      'Skip',
+      `${t('displayName')}: ${t('msg.syncProfile.prompt')}`,
+      t('msg.syncProfile.sync'),
+      t('msg.syncProfile.skip'),
     )
-    shouldSync = result === 'Sync'
+    shouldSync = result === t('msg.syncProfile.sync')
   }
 
   if (!shouldSync)
@@ -160,7 +159,7 @@ export async function syncProfile(
   })
 
   if (!silent)
-    window.showInformationMessage(`${displayName}: Config updated`)
+    window.showInformationMessage(`${t('displayName')}: ${t('msg.syncProfile.complete')}`)
   logger.info('Profile: sync complete')
 }
 
@@ -185,7 +184,7 @@ export async function syncSettings(
       await recorder.updateMtime('settings')
       logger.info(`Settings: local file missing, created from storage at ${path}`)
       if (!silent)
-        window.showInformationMessage(`${displayName}: Settings restored from storage`)
+        window.showInformationMessage(`${t('displayName')}: ${t('msg.settings.restored')}`)
       return
     }
     else {
@@ -210,7 +209,7 @@ export async function syncSettings(
     await pushMergedSettingsFromCurrentIde(recorder, currentIde, filteredLocal, changes)
 
     if (!silent)
-      window.showInformationMessage(`${displayName}: Settings file initialized`)
+      window.showInformationMessage(`${t('displayName')}: ${t('msg.settings.initialized')}`)
     logger.info('Settings: initialized storage with local keys')
     return
   }
@@ -248,7 +247,7 @@ export async function syncSettings(
   }
 
   if (!silent)
-    window.showInformationMessage(`${displayName}: Settings synced`)
+    window.showInformationMessage(`${t('displayName')}: ${t('msg.settings.synced')}`)
 }
 
 export async function syncKeybindings(
@@ -271,7 +270,7 @@ export async function syncKeybindings(
       await recorder.updateMtime('keybindings')
       logger.info(`Keybindings: local file missing, created from storage at ${path}`)
       if (!silent)
-        window.showInformationMessage(`${displayName}: Keybindings restored from storage`)
+        window.showInformationMessage(`${t('displayName')}: ${t('msg.keybindings.restored')}`)
       return
     }
     else {
@@ -292,7 +291,7 @@ export async function syncKeybindings(
     await writeStorageFile('keybindings.json', raw)
     await recorder.updateMtime('keybindings')
     if (!silent)
-      window.showInformationMessage(`${displayName}: Keybindings file initialized`)
+      window.showInformationMessage(`${t('displayName')}: ${t('msg.keybindings.initialized')}`)
     logger.info('Keybindings: initialized storage with local keys')
     return
   }
@@ -315,7 +314,7 @@ export async function syncKeybindings(
   }
 
   if (!silent)
-    window.showInformationMessage(`${displayName}: Keybindings synced`)
+    window.showInformationMessage(`${t('displayName')}: ${t('msg.keybindings.synced')}`)
 }
 
 export async function syncExtensions(
@@ -335,7 +334,7 @@ export async function syncExtensions(
     await writeExtensionStorage(currentIde, localIds, null)
     await recorder.updateMtime('extensions')
     if (!silent)
-      window.showInformationMessage(`${displayName}: Extension list initialized`)
+      window.showInformationMessage(`${t('displayName')}: ${t('msg.extensions.initialized')}`)
     logger.info(`Extensions: initialized storage with local list for ${currentIde}`)
     return
   }
@@ -355,5 +354,5 @@ export async function syncExtensions(
   }
 
   if (!silent)
-    window.showInformationMessage(`${displayName}: Extensions synced`)
+    window.showInformationMessage(`${t('displayName')}: ${t('msg.extensions.synced')}`)
 }
