@@ -1,4 +1,5 @@
 import type { AppName, MergeSettingsResult, SettingsSyncChanges, SyncMeta } from './types'
+import { workspace } from 'vscode'
 import micromatch from 'micromatch'
 import { config } from './config'
 import { jsonParse, jsonStringify } from './json'
@@ -8,8 +9,14 @@ function getWhitelistPatterns(): string[] {
   return ((config['settings.includeKeys'] as string[] | undefined) ?? []).filter(Boolean)
 }
 
+
+
 function getExcludePatterns(): string[] {
-  return ((config['settings.excludeKeys'] as string[] | undefined) ?? []).filter(Boolean)
+  const ignoredSettings = workspace.getConfiguration('settingsSync').get<string[]>('ignoredSettings') ?? []
+  return [
+    ...((config['settings.excludeKeys'] as string[] | undefined) ?? []),
+    ...ignoredSettings,
+  ].filter(Boolean)
 }
 
 export function isKeyIncluded(key: string): boolean {

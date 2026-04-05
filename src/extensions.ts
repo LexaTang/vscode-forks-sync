@@ -3,7 +3,7 @@ import type { AppName, ExtensionConfig, ExtensionsDiff, ExtensionStorage } from 
 import type { ConfigWatcher } from './watcher'
 import { dirname, join } from 'node:path'
 import micromatch from 'micromatch'
-import { commands, extensions, ProgressLocation, Uri, window } from 'vscode'
+import { commands, extensions, ProgressLocation, Uri, window, workspace } from 'vscode'
 import { config } from './config'
 import { DEFAULT_EXTENSIONS_GALLERY } from './constants'
 import { downloadVsixPackage } from './downloader'
@@ -45,9 +45,11 @@ export async function getUserExtensionIds(): Promise<string[]> {
 }
 
 function normalizeIds(ids: string[], perIdeExcludes: string[] = []): string[] {
+  const ignoredExtensions = workspace.getConfiguration('settingsSync').get<string[]>('ignoredExtensions') ?? []
   const patterns = [
     ...(((config['extensions.excludeExtensions'] as string[] | undefined) ?? []).map(id => id.toLowerCase())),
     ...perIdeExcludes.map(id => id.toLowerCase()),
+    ...ignoredExtensions.map((id: string) => id.toLowerCase()),
   ]
 
   return ids
@@ -130,8 +132,12 @@ export async function writeExtensionStorage(
 // ─── Diff & install ───────────────────────────────────────────────────────────
 
 export async function getExtensionsDiff(target: string[]): Promise<ExtensionsDiff | undefined> {
+  const { env } = await import('vscode')
+  const currentIde = env.appName as AppName
+  const perIdeExcludes = await readPerIdeExcludes(currentIde)
+
   const installed = await getLocalExtensions()
-  const targetSet = new Set(normalizeIds(target))
+  const targetSet = new Set(normalizeIds(target, perIdeExcludes))
   const installedSet = new Set(installed)
 
   const toInstall = [...targetSet].filter(id => !installedSet.has(id))
@@ -270,7 +276,7 @@ export async function applyExtensions(
 
     if (needsReload) {
       const reload = await window.showInformationMessage(
-        formatMessage('Extension sync complete. Reload window to apply changes?'),
+        formatMessage('Extension sync complete. Note: Please manually check extension enable/disable states. Reload window to apply changes?'),
         'Reload',
         'Later',
       )
