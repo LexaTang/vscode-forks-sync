@@ -1,9 +1,9 @@
+import type { AppName, BackupKind } from './types'
 import { Buffer } from 'node:buffer'
 import { dirname } from 'node:path'
-import type { AppName, BackupKind } from './types'
 import { Uri, workspace } from 'vscode'
-import { jsonParse } from './json'
 import { config } from './config'
+import { jsonParse } from './json'
 import { logger, readFile, resolvePathUri } from './utils'
 
 function sanitizeAppName(appName: AppName): string {
@@ -123,15 +123,15 @@ export async function readAllSettingsSnapshots(appNames: readonly AppName[]): Pr
 
 export async function writeBackupFile(kind: BackupKind, appName: AppName, content: string): Promise<Uri> {
   const now = new Date()
-  const timestamp = [
+  const timestamp = `${[
     now.getFullYear(),
     String(now.getMonth() + 1).padStart(2, '0'),
     String(now.getDate()).padStart(2, '0'),
-  ].join('') + '-' + [
+  ].join('')}-${[
     String(now.getHours()).padStart(2, '0'),
     String(now.getMinutes()).padStart(2, '0'),
     String(now.getSeconds()).padStart(2, '0'),
-  ].join('')
+  ].join('')}`
 
   const uri = Uri.joinPath(getBackupDirectoryUri(kind), `${sanitizeAppName(appName)}-${timestamp}.json`)
   await ensureStorageDirectory()

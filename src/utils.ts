@@ -1,13 +1,14 @@
+import type { ExtensionContext } from 'vscode'
 import { Buffer } from 'node:buffer'
-import { homedir, platform } from 'node:os'
-import process from 'node:process'
+import { appendFile, mkdir } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+
 import { useLogger } from 'reactive-vscode'
 import { Uri, workspace } from 'vscode'
-import { displayName } from './generated/meta'
-
-import { appendFile, mkdir } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
 import { config } from './config'
+
+import { displayName } from './generated/meta'
 
 let _baseLogger: ReturnType<typeof useLogger> | undefined
 function getBaseLogger() {
@@ -21,22 +22,24 @@ async function writeLogToFile(level: string, message: string, ...args: any[]) {
     const storageDir = resolvePathUri(config.storagePath).fsPath
     await mkdir(storageDir, { recursive: true })
     const logPath = join(storageDir, 'vscode-forks-sync.log')
-    
+
     const now = new Date()
     const ts = now.toISOString().replace('T', ' ').slice(0, 19)
     const { env } = await import('vscode')
-    
+
     let fullMessage = `[${ts}] [${env.appName}] [${level}] ${message}`
     if (args.length > 0) {
-      fullMessage += ' ' + args.map(a => 
-        a instanceof Error ? a.stack || a.message : 
-        typeof a === 'object' ? JSON.stringify(a) : String(a)
-      ).join(' ')
+      fullMessage += ` ${args.map(a =>
+        a instanceof Error
+          ? a.stack || a.message
+          : typeof a === 'object' ? JSON.stringify(a) : String(a),
+      ).join(' ')}`
     }
     fullMessage += '\n'
-    
+
     await appendFile(logPath, fullMessage, 'utf-8')
-  } catch (err) {
+  }
+  catch (err) {
     console.error('Failed to write to log file:', err)
   }
 }
@@ -56,12 +59,10 @@ export const logger = {
   },
 }
 
-import type { ExtensionContext } from 'vscode'
-
 export async function findConfigFile(ctx: ExtensionContext, file: string): Promise<string | undefined> {
   const userDir = Uri.joinPath(ctx.globalStorageUri, '../../').fsPath
   const path = join(userDir, file)
-  
+
   try {
     await workspace.fs.stat(Uri.file(path))
     logger.info(`Found ${file} at: ${path}`)

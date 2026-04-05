@@ -8,8 +8,8 @@ export const EDITOR_CONFIG_NAME_MAP = {
   'Visual Studio Code': 'Code',
   'VSCodium - Insiders': 'VSCodium - Insiders',
   'VSCodium': 'VSCodium',
-  'Windsurf': 'Windsurf',
   'Windsurf Next': 'Windsurf Next',
+  'Windsurf': 'Windsurf',
 } as const
 
 export const APP_NAMES = Object.keys(EDITOR_CONFIG_NAME_MAP) as (keyof typeof EDITOR_CONFIG_NAME_MAP)[]

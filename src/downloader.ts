@@ -1,4 +1,4 @@
-import type { ExtensionsGallery, ExtensionQueryResponse, OpenVsxExtension } from './types'
+import type { ExtensionQueryResponse, ExtensionsGallery, OpenVsxExtension } from './types'
 import { Buffer } from 'node:buffer'
 import { ofetch } from 'ofetch'
 import { Uri } from 'vscode'

@@ -1,17 +1,16 @@
-import type { ExtensionConfig, ExtensionStorage, ExtensionsDiff } from './types'
-import type { ConfigWatcher } from './watcher'
 import type { MetaRecorder } from './recorder'
-import { commands, extensions, ProgressLocation, Uri, window } from 'vscode'
+import type { AppName, ExtensionConfig, ExtensionsDiff, ExtensionStorage } from './types'
+import type { ConfigWatcher } from './watcher'
+import { dirname, join } from 'node:path'
 import micromatch from 'micromatch'
-import { DEFAULT_EXTENSIONS_GALLERY } from './constants'
+import { commands, extensions, ProgressLocation, Uri, window } from 'vscode'
 import { config } from './config'
+import { DEFAULT_EXTENSIONS_GALLERY } from './constants'
 import { downloadVsixPackage } from './downloader'
 import { displayName, extensionId } from './generated/meta'
 import { jsonParse, jsonStringify } from './json'
 import { readStorageFile, storageFileExists, writeStorageFile } from './storage'
 import { logger, readFile } from './utils'
-import type { AppName } from './types'
-import { join, dirname } from 'node:path'
 
 // ─── Local extension reading ───────────────────────────────────────────────────
 
@@ -91,7 +90,8 @@ export async function readExtensionStorage(): Promise<ExtensionStorage | null> {
 function computeMerged(perIde: Partial<Record<AppName, string[]>>): string[] {
   const all = new Set<string>()
   for (const ids of Object.values(perIde)) {
-    if (ids) ids.forEach(id => all.add(id))
+    if (ids)
+      ids.forEach(id => all.add(id))
   }
   return [...all].sort()
 }

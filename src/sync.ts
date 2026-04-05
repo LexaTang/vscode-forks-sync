@@ -2,8 +2,15 @@ import type { ExtensionContext } from 'vscode'
 import type { MetaRecorder } from './recorder'
 import type { AppName, SettingsSyncChanges, SyncCommandContext } from './types'
 import { env, window } from 'vscode'
-import { APP_NAMES } from './constants'
 import { config } from './config'
+import { APP_NAMES } from './constants'
+import {
+  applyExtensions,
+  getExtensionsPath,
+  getLocalExtensions,
+  readExtensionStorage,
+  writeExtensionStorage,
+} from './extensions'
 import { displayName } from './generated/meta'
 import {
   applySyncedSettings,
@@ -15,13 +22,6 @@ import {
   stringifySettings,
 } from './merger'
 import { getKeybindings, getSettings, setKeybindings, setSettings } from './profile'
-import {
-  applyExtensions,
-  getExtensionsPath,
-  getLocalExtensions,
-  readExtensionStorage,
-  writeExtensionStorage,
-} from './extensions'
 import {
   ensureStorageDirectory,
   getStorageFileUri,

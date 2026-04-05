@@ -31,10 +31,10 @@
   "main": "./dist/index.js",
   "icon": "res/icon.png",
   "files": [
-    "dist/*",
-    "res/*",
     "LICENSE.md",
-    "README.md"
+    "README.md",
+    "dist/*",
+    "res/*"
   ],
   "engines": {
     "vscode": "^1.90.0"
@@ -182,19 +182,20 @@
     "update": "taze major -r"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^6.7.3",
-    "@types/micromatch": "^4.0.10",
-    "@types/node": "^25.5.2",
+    "@antfu/eslint-config": "catalog:lint",
+    "@types/micromatch": "catalog:",
+    "@types/node": "catalog:conflicts_types_h25_5_2",
     "@types/vscode": "1.90.0",
-    "@vscode/vsce": "^3.7.1",
-    "comment-json": "^4.6.2",
-    "eslint": "^9.39.4",
-    "micromatch": "^4.0.8",
-    "ofetch": "^1.5.1",
-    "reactive-vscode": "^0.4.1",
-    "taze": "^19.11.0",
-    "tsdown": "^0.18.4",
-    "typescript": "^5.9.3",
-    "vscode-ext-gen": "^1.6.0"
+    "@vscode/vsce": "catalog:cli",
+    "comment-json": "catalog:conflicts_utils_h4_6_2",
+    "eslint": "catalog:conflicts_lint_h9_39_4",
+    "micromatch": "catalog:",
+    "ofetch": "catalog:network",
+    "pncat": "catalog:cli",
+    "reactive-vscode": "catalog:vscode",
+    "taze": "catalog:conflicts_cli_h19_11_0",
+    "tsdown": "catalog:build",
+    "typescript": "catalog:tsc",
+    "vscode-ext-gen": "catalog:conflicts_vscode_h1_6_0"
   }
 }

@@ -1,5 +1,5 @@
-import { Buffer } from 'node:buffer'
 import type { AppName } from './types'
+import { Buffer } from 'node:buffer'
 import { env, Uri, workspace } from 'vscode'
 import { config } from './config'
 import { writeBackupFile } from './storage'

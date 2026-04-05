@@ -4,6 +4,11 @@ import type { AppName, SyncType } from './types'
 import { env, extensions, workspace } from 'vscode'
 import { APP_NAMES } from './constants'
 import {
+  getLocalExtensions,
+  readExtensionStorage,
+  writeExtensionStorage,
+} from './extensions'
+import {
   buildMergedSettings,
   diffSettingsKeys,
   filterSettingsKeys,
@@ -11,11 +16,6 @@ import {
   stringifySettings,
 } from './merger'
 import { getKeybindings, getSettings } from './profile'
-import {
-  getLocalExtensions,
-  readExtensionStorage,
-  writeExtensionStorage,
-} from './extensions'
 import {
   ensureStorageDirectory,
   readAllSettingsSnapshots,
@@ -35,6 +35,7 @@ export class ConfigWatcher {
     keybindings: 0,
     extensions: 0,
   }
+
   private prevSettingsRaw?: string
   private prevKeybindingsRaw?: string
 
@@ -133,7 +134,7 @@ export class ConfigWatcher {
           await this.recorder.updateMtime('settings', currentIde, timestamp)
           this.prevSettingsRaw = raw
 
-          logger.info(`Watcher: settings synced to storage (${changes.upserted.length} updated, ${changes.deleted.length} deleted)`) 
+          logger.info(`Watcher: settings synced to storage (${changes.upserted.length} updated, ${changes.deleted.length} deleted)`)
         }
         catch (error) {
           logger.error('Watcher: failed to sync settings', error)
