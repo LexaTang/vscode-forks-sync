@@ -106,24 +106,62 @@ function computeMerged(perIde: Partial<Record<AppName, string[]>>): string[] {
  * The gallery field is taken from the plugin config at write-time so every
  * IDE that reads the file knows where to download from.
  */
+/**
+ * Update and persist extension storage.
+ * All updates to extensions.json MUST go through this function to ensure
+ * the merged list and shared config (gallery) are correctly maintained.
+ */
 export async function writeExtensionStorage(
   currentIde: AppName,
-  successfulIds: string[],
+  updates: {
+    successfulIds?: string[]
+    failedIds?: string[]
+    excludeIds?: string[]
+  },
   existing: ExtensionStorage | null,
 ): Promise<void> {
   const perIde = existing?.perIde ? { ...existing.perIde } : {} as Partial<Record<AppName, string[]>>
-  perIde[currentIde] = normalizeIds(successfulIds, existing?.excludePerIde?.[currentIde] ?? [])
+  const failedInstalls = existing?.failedInstalls ? { ...existing.failedInstalls } : {} as Partial<Record<AppName, string[]>>
+  const excludePerIde = existing?.excludePerIde ? { ...existing.excludePerIde } : {} as Partial<Record<AppName, string[]>>
+
+  // 1. Update exclude list if provided
+  if (updates.excludeIds)
+    excludePerIde[currentIde] = [...new Set([...(excludePerIde[currentIde] ?? []), ...updates.excludeIds])]
+
+  const currentExcludes = excludePerIde[currentIde] ?? []
+
+  // 2. Update successful list if provided
+  if (updates.successfulIds)
+    perIde[currentIde] = normalizeIds(updates.successfulIds, currentExcludes)
+
+  // 3. Update failed list if provided
+  if (updates.failedIds)
+    failedInstalls[currentIde] = [...new Set([...(failedInstalls[currentIde] ?? []), ...updates.failedIds])]
 
   const gallery = (config.extensionsGallery as ExtensionStorage['gallery'] | undefined)
     ?? existing?.gallery
     ?? DEFAULT_EXTENSIONS_GALLERY
 
+  // 4. Compute Merged List: UNION of (successful + failed) minus (excludes)
+  // We include failed IDs in the merged list so they aren't removed from the desire list
+  // just because one IDE couldn't install them.
+  const allParticipatingIds = { ...perIde }
+  for (const [ide, ids] of Object.entries(failedInstalls)) {
+    if (ids && ids.length > 0) {
+      const existingSuccess = allParticipatingIds[ide] ?? []
+      const localExcludes = excludePerIde[ide] ?? []
+      // Re-normalize failed IDs against that IDE's exclusions
+      const validFailed = normalizeIds(ids, localExcludes)
+      allParticipatingIds[ide] = [...new Set([...existingSuccess, ...validFailed])]
+    }
+  }
+
   const storage: ExtensionStorage = {
     gallery,
     perIde,
-    merged: computeMerged(perIde),
-    failedInstalls: existing?.failedInstalls,
-    excludePerIde: existing?.excludePerIde,
+    merged: computeMerged(allParticipatingIds),
+    failedInstalls,
+    excludePerIde,
   }
 
   await writeStorageFile(EXTENSIONS_FILE, jsonStringify(storage))
@@ -270,9 +308,9 @@ export async function applyExtensions(
       }
     }
 
-    const nowInstalled = await getLocalExtensions()
+    const nowInstalled = await getUserExtensionIds()
     const latestStorage = await readExtensionStorage()
-    await writeExtensionStorage(currentIde, nowInstalled, latestStorage ?? storage)
+    await writeExtensionStorage(currentIde, { successfulIds: nowInstalled }, latestStorage ?? storage)
     await recorder.updateMtime('extensions')
 
     if (needsReload) {
@@ -334,11 +372,7 @@ export async function installFromVsix(
       const { env } = await import('vscode')
       const currentIde = env.appName as AppName
       const latestStorage = await readExtensionStorage()
-      const base = latestStorage ?? { perIde: {}, merged: [], gallery: storage?.gallery ?? DEFAULT_EXTENSIONS_GALLERY } as ExtensionStorage
-      const existingFailed = base.failedInstalls ? { ...base.failedInstalls } : {} as Partial<Record<AppName, string[]>>
-      const prevFailed = existingFailed[currentIde] ?? []
-      existingFailed[currentIde] = [...new Set([...prevFailed, ...failed])]
-      await writeStorageFile(EXTENSIONS_FILE, jsonStringify({ ...base, failedInstalls: existingFailed }))
+      await writeExtensionStorage(currentIde, { failedIds: failed }, latestStorage ?? storage)
       logger.warn(`Persisted ${failed.length} failed install(s) to extensions.json for ${currentIde}: ${failed.join(', ')}`)
 
       const failedCount = failed.length
@@ -350,11 +384,7 @@ export async function installFromVsix(
       ).then(async (action) => {
         if (action === 'Add to Exclude List') {
           const freshStorage = await readExtensionStorage()
-          const freshBase = freshStorage ?? { perIde: {}, merged: [], gallery: storage?.gallery ?? DEFAULT_EXTENSIONS_GALLERY } as ExtensionStorage
-          const existingExcludes = freshBase.excludePerIde ? { ...freshBase.excludePerIde } : {} as Partial<Record<AppName, string[]>>
-          const prevExcludes = existingExcludes[currentIde] ?? []
-          existingExcludes[currentIde] = [...new Set([...prevExcludes, ...failed])]
-          await writeStorageFile(EXTENSIONS_FILE, jsonStringify({ ...freshBase, excludePerIde: existingExcludes }))
+          await writeExtensionStorage(currentIde, { excludeIds: failed }, freshStorage ?? storage)
           logger.info(`Added to per-IDE exclude list for ${currentIde}: ${failed.join(', ')}`)
           window.showInformationMessage(
             `Fork Sync: Added ${label} to ${currentIde}'s exclude list. They will be skipped in future syncs.`,

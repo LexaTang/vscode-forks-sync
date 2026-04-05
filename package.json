@@ -177,7 +177,8 @@
     "vscode:prepublish": "pnpm build",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "update": "taze major -r"
+    "update": "taze major -r",
+    "release": "pnpm lint && pnpm typecheck && bumpp"
   },
   "devDependencies": {
     "@antfu/eslint-config": "catalog:lint",
@@ -185,6 +186,7 @@
     "@types/node": "catalog:conflicts_types_h25_5_2",
     "@types/vscode": "1.90.0",
     "@vscode/vsce": "catalog:cli",
+    "bumpp": "catalog:cli",
     "comment-json": "catalog:conflicts_utils_h4_6_2",
     "eslint": "catalog:conflicts_lint_h9_39_4",
     "micromatch": "catalog:",

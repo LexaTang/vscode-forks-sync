@@ -13,6 +13,7 @@ catalogs:
 
   cli:
     '@vscode/vsce': ^3.7.1
+    bumpp: ^11.0.1
     pncat: ^0.7.8
 
   conflicts_cli_h19_11_0:

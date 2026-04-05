@@ -158,7 +158,7 @@ export class ConfigWatcher {
           const currentIde = env.appName as AppName
           const localIds = await getLocalExtensions()
           const existing = await readExtensionStorage()
-          await writeExtensionStorage(currentIde, localIds, existing)
+          await writeExtensionStorage(currentIde, { successfulIds: localIds }, existing)
           await this.recorder.updateMtime('extensions')
           logger.info('Watcher: extensions synced to storage')
         }

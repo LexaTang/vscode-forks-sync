@@ -1,5 +1,3 @@
-
-
 export type AppName = string
 
 export type SyncType = 'settings' | 'extensions' | 'keybindings'

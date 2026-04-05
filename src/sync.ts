@@ -372,7 +372,7 @@ export async function syncExtensions(
 
   if (!storage) {
     const localIds = await getLocalExtensions()
-    await writeExtensionStorage(currentIde, localIds, null)
+    await writeExtensionStorage(currentIde, { successfulIds: localIds }, null)
     await recorder.updateMtime('extensions')
     if (!silent)
       window.showInformationMessage(`${t('displayName')}: ${t('msg.extensions.initialized')}`)
@@ -389,7 +389,7 @@ export async function syncExtensions(
   }
   else if (syncDirection === -1) {
     const localIds = await getLocalExtensions()
-    await writeExtensionStorage(currentIde, localIds, storage)
+    await writeExtensionStorage(currentIde, { successfulIds: localIds }, storage)
     await recorder.updateMtime('extensions')
     logger.info(`Extensions: pushed local list for ${currentIde}`)
   }
