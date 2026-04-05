@@ -1,7 +1,7 @@
 import type { ExtensionContext } from 'vscode'
 import type { MetaRecorder } from './recorder'
 import type { AppName, SettingsSyncChanges, SyncCommandContext } from './types'
-import { env, window } from 'vscode'
+import { env, Uri, window } from 'vscode'
 import { config } from './config'
 import { APP_NAMES } from './constants'
 import {
@@ -215,14 +215,51 @@ export async function syncSettings(
   }
 
   const storageUri = getStorageFileUri('settings.json')
-  const syncDirection = await recorder.compareMtime('settings', storageUri.fsPath, resolvedSettingsPath)
+  const previousSnapshotRaw = await readSettingsSnapshot(currentIde)
+  const isFirstSync = !previousSnapshotRaw
 
-  if (syncDirection === 1) {
+  // ── PUSH: content-driven (snapshot diff) ─────────────────────────────────
+  // Always check for local changes regardless of mtime.
+  // mtime is unreliable for push decisions: a newly-created settings.json on a
+  // fresh IDE will have a very recent mtime even though it has no user changes.
+  const baseForDiff = previousSnapshotRaw ? parseSettings(previousSnapshotRaw) : {}
+  const changes = diffSettingsKeys(baseForDiff, filteredLocal)
+  const hasPushChanges = !previousSnapshotRaw || changes.upserted.length > 0 || changes.deleted.length > 0
+
+  if (hasPushChanges) {
+    await pushMergedSettingsFromCurrentIde(recorder, currentIde, filteredLocal, changes)
+    logger.info(`Settings: pushed — ${changes.upserted.length} upserted, ${changes.deleted.length} deleted${isFirstSync ? ' (first sync)' : ''}`)
+  }
+
+  // ── PULL: mtime-driven guard ──────────────────────────────────────────────
+  // Only pull if storage is newer than local. This prevents overwriting local
+  // edits that haven't been pushed yet (e.g., if push was skipped for some reason).
+  // Exception: a new IDE with no settings should always pull, regardless of mtime.
+  const localIsEmpty = Object.keys(filteredLocal).length === 0
+  let storageStat: { mtime: number } | undefined
+  let localStat: { mtime: number } | undefined
+  try {
+    const { workspace: ws } = await import('vscode')
+    ;[storageStat, localStat] = await Promise.all([
+      ws.fs.stat(storageUri),
+      ws.fs.stat(Uri.file(resolvedSettingsPath)),
+    ])
+  }
+  catch { /* stat failure → skip pull */ }
+
+  const storageIsNewer = storageStat && localStat ? storageStat.mtime > localStat.mtime : false
+  const shouldPull = (isFirstSync && localIsEmpty) || storageIsNewer
+
+  if (shouldPull) {
+    if (isFirstSync && localIsEmpty)
+      logger.info('Settings: new IDE with empty settings — pulling from storage')
+
     const mergedResult = mergeMode === 'merge'
       ? mergeSettings(localSettings, await recorder.readAll(), await readAllSettingsSnapshots(APP_NAMES))
       : applySyncedSettings(localSettings, parseSettings(await readStorageFile('settings.json')))
 
-    if (!(await confirmSettingsPull(mergedResult.overriddenKeys)))
+    // Skip poka-yoke for first sync on a new/empty IDE (nothing to overwrite)
+    if (!isFirstSync && !(await confirmSettingsPull(mergedResult.overriddenKeys)))
       return
 
     const nextRaw = stringifySettings(mergedResult.syncedSettings)
@@ -235,15 +272,6 @@ export async function syncSettings(
     await writeSettingsSnapshot(currentIde, stringifySettings(filterSettingsKeys(mergedResult.syncedSettings)))
     await recorder.updateMtime('settings')
     logger.info('Settings: pulled from storage')
-  }
-  else if (syncDirection === -1) {
-    const previousSnapshot = parseSettings((await readSettingsSnapshot(currentIde)) ?? '{}')
-    const changes = diffSettingsKeys(previousSnapshot, filteredLocal)
-
-    if (changes.upserted.length > 0 || changes.deleted.length > 0) {
-      await pushMergedSettingsFromCurrentIde(recorder, currentIde, filteredLocal, changes)
-      logger.info(`Settings: tracked ${changes.upserted.length} updated and ${changes.deleted.length} deleted keys`)
-    }
   }
 
   if (!silent)
