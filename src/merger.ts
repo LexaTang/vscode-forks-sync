@@ -70,8 +70,9 @@ export function diffSettingsKeys(
 export function buildMergedSettings(
   syncMeta: SyncMeta,
   ideSnapshots: Map<AppName, Record<string, unknown>>,
-): Record<string, unknown> {
+): { merged: Record<string, unknown>, sources: Record<string, string> } {
   const merged: Record<string, unknown> = {}
+  const sources: Record<string, string> = {}
   const trackedKeys = new Set<string>()
 
   for (const appMeta of Object.values(syncMeta)) {
@@ -101,26 +102,35 @@ export function buildMergedSettings(
       continue
 
     const snapshot = ideSnapshots.get(winningIde)
-    if (snapshot && key in snapshot)
+    if (snapshot && key in snapshot) {
       merged[key] = snapshot[key]
+      sources[key] = winningIde
+    }
   }
 
-  return merged
+  return { merged, sources }
 }
 
 export function applySyncedSettings(
   localSettings: Record<string, unknown>,
   syncedSettings: Record<string, unknown>,
+  sources?: Record<string, string>,
 ): MergeSettingsResult {
   const result: Record<string, unknown> = { ...localSettings }
   const localSyncKeys = Object.keys(filterSettingsKeys(localSettings))
-  const affectedKeys = new Set([...localSyncKeys, ...Object.keys(syncedSettings)])
+
+  // Filter incoming settings to respect current IDE's exclusion rules during pull
+  const filteredSyncedSettings = filterSettingsKeys(syncedSettings)
+
+  const affectedKeys = new Set([...localSyncKeys, ...Object.keys(filteredSyncedSettings)])
   const overriddenKeys: string[] = []
 
+  // Remove local keys that are allowed to be synced (they will be replaced or removed if not in remote)
   for (const key of localSyncKeys)
     delete result[key]
 
-  for (const [key, value] of Object.entries(syncedSettings))
+  // Apply the remote keys that are allowed to be synced
+  for (const [key, value] of Object.entries(filteredSyncedSettings))
     result[key] = value
 
   for (const key of affectedKeys) {
@@ -131,6 +141,7 @@ export function applySyncedSettings(
   return {
     syncedSettings: result,
     overriddenKeys,
+    keySources: sources,
   }
 }
 
@@ -139,7 +150,8 @@ export function mergeSettings(
   syncMeta: SyncMeta,
   ideSnapshots: Map<AppName, Record<string, unknown>>,
 ): MergeSettingsResult {
-  return applySyncedSettings(localSettings, buildMergedSettings(syncMeta, ideSnapshots))
+  const { merged, sources } = buildMergedSettings(syncMeta, ideSnapshots)
+  return applySyncedSettings(localSettings, merged, sources)
 }
 
 export function parseSettings(raw: string): Record<string, unknown> {

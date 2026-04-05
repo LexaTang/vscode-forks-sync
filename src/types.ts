@@ -1,6 +1,6 @@
-import type { EDITOR_CONFIG_NAME_MAP } from './constants'
 
-export type AppName = keyof typeof EDITOR_CONFIG_NAME_MAP
+
+export type AppName = string
 
 export type SyncType = 'settings' | 'extensions' | 'keybindings'
 
@@ -26,6 +26,7 @@ export interface SettingsSyncChanges {
 export interface MergeSettingsResult {
   syncedSettings: Record<string, unknown>
   overriddenKeys: string[]
+  keySources?: Record<string, string>
 }
 
 export interface ExtensionsGallery {

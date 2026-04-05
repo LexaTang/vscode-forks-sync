@@ -3,7 +3,6 @@ import type { MetaRecorder } from './recorder'
 import type { AppName, SettingsSyncChanges, SyncCommandContext } from './types'
 import { env, Uri, window } from 'vscode'
 import { config } from './config'
-import { APP_NAMES } from './constants'
 import {
   applyExtensions,
   getExtensionsPath,
@@ -95,12 +94,10 @@ async function confirmSettingsPull(overriddenKeys: string[]): Promise<boolean> {
 }
 
 async function getMergedSettingsFromSnapshots(recorder: MetaRecorder): Promise<Record<string, unknown>> {
-  const [syncMeta, snapshots] = await Promise.all([
-    recorder.readAll(),
-    readAllSettingsSnapshots(APP_NAMES),
-  ])
+  const syncMeta = await recorder.readAll()
+  const snapshots = await readAllSettingsSnapshots(Object.keys(syncMeta))
 
-  const merged = buildMergedSettings(syncMeta, snapshots)
+  const { merged } = buildMergedSettings(syncMeta, snapshots)
   if (Object.keys(merged).length > 0)
     return merged
 
@@ -228,7 +225,9 @@ export async function syncSettings(
 
   if (hasPushChanges) {
     await pushMergedSettingsFromCurrentIde(recorder, currentIde, filteredLocal, changes)
-    logger.info(`Settings: pushed — ${changes.upserted.length} upserted, ${changes.deleted.length} deleted${isFirstSync ? ' (first sync)' : ''}`)
+    const upsertedKeys = changes.upserted.length > 0 ? ` [${changes.upserted.join(', ')}]` : ''
+    const deletedKeys = changes.deleted.length > 0 ? ` [${changes.deleted.join(', ')}]` : ''
+    logger.info(`Settings: pushed — ${changes.upserted.length} upserted${upsertedKeys}, ${changes.deleted.length} deleted${deletedKeys}${isFirstSync ? ' (first sync)' : ''}`)
   }
 
   // ── PULL: mtime-driven guard ──────────────────────────────────────────────
@@ -254,8 +253,9 @@ export async function syncSettings(
     if (isFirstSync && localIsEmpty)
       logger.info('Settings: new IDE with empty settings — pulling from storage')
 
+    const syncMeta = await recorder.readAll()
     const mergedResult = mergeMode === 'merge'
-      ? mergeSettings(localSettings, await recorder.readAll(), await readAllSettingsSnapshots(APP_NAMES))
+      ? mergeSettings(localSettings, syncMeta, await readAllSettingsSnapshots(Object.keys(syncMeta)))
       : applySyncedSettings(localSettings, parseSettings(await readStorageFile('settings.json')))
 
     // Skip poka-yoke for first sync on a new/empty IDE (nothing to overwrite)
@@ -271,7 +271,20 @@ export async function syncSettings(
 
     await writeSettingsSnapshot(currentIde, stringifySettings(filterSettingsKeys(mergedResult.syncedSettings)))
     await recorder.updateMtime('settings')
-    logger.info('Settings: pulled from storage')
+
+    // Build detailed pulled keys log
+    if (mergedResult.overriddenKeys.length > 0) {
+      if (mergedResult.keySources) {
+        const pulledDetails = mergedResult.overriddenKeys.map(k => `${k} (from ${mergedResult.keySources![k] || 'unknown'})`)
+        logger.info(`Settings: pulled ${mergedResult.overriddenKeys.length} keys from storage: ${pulledDetails.join(', ')}`)
+      }
+      else {
+        logger.info(`Settings: pulled ${mergedResult.overriddenKeys.length} keys from storage: ${mergedResult.overriddenKeys.join(', ')}`)
+      }
+    }
+    else {
+      logger.info('Settings: pulled from storage (no local overrides)')
+    }
   }
 
   if (!silent)

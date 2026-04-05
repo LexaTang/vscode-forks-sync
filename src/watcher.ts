@@ -2,7 +2,6 @@ import type { ExtensionContext, FileSystemWatcher, Uri } from 'vscode'
 import type { MetaRecorder } from './recorder'
 import type { AppName, SyncType } from './types'
 import { env, extensions, workspace } from 'vscode'
-import { APP_NAMES } from './constants'
 import {
   getLocalExtensions,
   readExtensionStorage,
@@ -126,15 +125,18 @@ export class ConfigWatcher {
           await this.recorder.applySettingsChanges(changes, timestamp, currentIde)
           await writeSettingsSnapshot(currentIde, stringifySettings(filteredCurrent))
 
+          const syncMeta = await this.recorder.readAll()
           const merged = buildMergedSettings(
-            await this.recorder.readAll(),
-            await readAllSettingsSnapshots(APP_NAMES),
+            syncMeta,
+            await readAllSettingsSnapshots(Object.keys(syncMeta)),
           )
           await writeStorageFile('settings.json', stringifySettings(merged))
           await this.recorder.updateMtime('settings', currentIde, timestamp)
           this.prevSettingsRaw = raw
 
-          logger.info(`Watcher: settings synced to storage (${changes.upserted.length} updated, ${changes.deleted.length} deleted)`)
+          const upsertedKeys = changes.upserted.length > 0 ? ` [${changes.upserted.join(', ')}]` : ''
+          const deletedKeys = changes.deleted.length > 0 ? ` [${changes.deleted.join(', ')}]` : ''
+          logger.info(`Watcher: settings synced to storage (${changes.upserted.length} updated${upsertedKeys}, ${changes.deleted.length} deleted${deletedKeys})`)
         }
         catch (error) {
           logger.error('Watcher: failed to sync settings', error)
