@@ -32,7 +32,9 @@
   "icon": "res/icon.png",
   "files": [
     "dist/*",
-    "res/*"
+    "res/*",
+    "LICENSE.md",
+    "README.md"
   ],
   "engines": {
     "vscode": "^1.90.0"
@@ -112,14 +114,10 @@
           "default": [
             "telemetry.enableTelemetry",
             "update.channel",
-            "extensions.autoUpdate"
+            "extensions.autoUpdate",
+            "vscode-forks-sync.*"
           ],
-          "description": "Settings keys (supports glob patterns like 'editor.*') that are never synced regardless of mode."
-        },
-        "vscode-forks-sync.settings.useIncludeKeys": {
-          "type": "boolean",
-          "default": false,
-          "description": "If true, only keys listed in vscode-forks-sync.settings.includeKeys are synced (whitelist mode)."
+          "description": "Settings keys excluded from sync. Supports glob patterns like 'editor.*'. Excluded keys are always kept local."
         },
         "vscode-forks-sync.settings.includeKeys": {
           "type": "array",
@@ -127,7 +125,18 @@
             "type": "string"
           },
           "default": [],
-          "description": "Settings keys to sync when whitelist mode is enabled (supports glob patterns like 'editor.*')."
+          "description": "Optional settings whitelist. When non-empty, only matching keys participate in sync; all other keys stay local. Supports glob patterns like 'editor.*'."
+        },
+        "vscode-forks-sync.settings.pokaYokeThreshold": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "description": "Ask for confirmation before applying a settings pull that would overwrite this many synced keys or more."
+        },
+        "vscode-forks-sync.backupBeforeLocalWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "Create a per-IDE backup before writing local settings.json or keybindings.json. Restore is manual."
         },
         "vscode-forks-sync.extensions.excludeExtensions": {
           "type": "array",
@@ -135,11 +144,11 @@
             "type": "string"
           },
           "default": [],
-          "description": "Extension IDs to exclude from sync (case-insensitive)."
+          "description": "Extension IDs excluded from sync. Supports glob patterns and is matched case-insensitively."
         },
         "vscode-forks-sync.extensionsGallery": {
           "type": "object",
-          "description": "Extension gallery used for downloading VSIX packages. Stored in extensions.json so all IDEs can use the same source.",
+          "description": "Open VSX-compatible gallery used for VSIX lookup. Fork Sync currently uses serviceUrl for Open VSX-style registries and falls back to VS Marketplace.",
           "default": {
             "serviceUrl": "https://open-vsx.org/vscode/gallery",
             "itemUrl": "https://open-vsx.org/vscode/item"
@@ -149,9 +158,6 @@
               "type": "string"
             },
             "itemUrl": {
-              "type": "string"
-            },
-            "resourceUrlTemplate": {
               "type": "string"
             }
           }
@@ -175,7 +181,7 @@
     "@antfu/eslint-config": "^6.7.3",
     "@types/micromatch": "^4.0.10",
     "@types/node": "^25.5.2",
-    "@types/vscode": "1.101.0",
+    "@types/vscode": "1.90.0",
     "@vscode/vsce": "^3.7.1",
     "comment-json": "^4.6.2",
     "eslint": "^9.39.4",

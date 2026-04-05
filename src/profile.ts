@@ -1,7 +1,31 @@
 import { Buffer } from 'node:buffer'
-import { Uri, workspace } from 'vscode'
+import type { AppName } from './types'
+import { env, Uri, workspace } from 'vscode'
 import { config } from './config'
-import { logger, readFile } from './utils'
+import { writeBackupFile } from './storage'
+import { logger } from './utils'
+
+interface WriteLocalFileOptions {
+  backup?: boolean
+}
+
+async function maybeBackupLocalFile(path: string, kind: 'settings' | 'keybindings', backup = config.backupBeforeLocalWrite): Promise<void> {
+  if (!backup)
+    return
+
+  try {
+    const content = Buffer.from(await workspace.fs.readFile(Uri.file(path))).toString('utf-8')
+    await writeBackupFile(kind, env.appName as AppName, content)
+  }
+  catch (error) {
+    logger.warn(`Skipping ${kind} backup for ${path}`, error)
+  }
+}
+
+async function writeLocalFile(path: string, content: string, kind: 'settings' | 'keybindings', options: WriteLocalFileOptions = {}): Promise<void> {
+  await maybeBackupLocalFile(path, kind, options.backup)
+  await workspace.fs.writeFile(Uri.file(path), Buffer.from(content, 'utf8'))
+}
 
 export async function getSettings(path: string): Promise<string> {
   try {
@@ -13,7 +37,7 @@ export async function getSettings(path: string): Promise<string> {
   }
 }
 
-export async function setSettings(path: string, settings: string | Record<string, unknown>): Promise<void> {
+export async function setSettings(path: string, settings: string | Record<string, unknown>, options: WriteLocalFileOptions = {}): Promise<void> {
   try {
     const content = typeof settings === 'string'
       ? settings
@@ -22,7 +46,7 @@ export async function setSettings(path: string, settings: string | Record<string
     if (!content)
       throw new Error('Settings content is empty')
 
-    await workspace.fs.writeFile(Uri.file(path), Buffer.from(content, 'utf8'))
+    await writeLocalFile(path, content, 'settings', options)
     logger.info(`Settings updated: ${path}`)
   }
   catch (error) {
@@ -41,9 +65,9 @@ export async function getKeybindings(path: string): Promise<string> {
   }
 }
 
-export async function setKeybindings(path: string, keybindings: string): Promise<void> {
+export async function setKeybindings(path: string, keybindings: string, options: WriteLocalFileOptions = {}): Promise<void> {
   try {
-    await workspace.fs.writeFile(Uri.file(path), Buffer.from(keybindings, 'utf8'))
+    await writeLocalFile(path, keybindings, 'keybindings', options)
     logger.info(`Keybindings updated: ${path}`)
   }
   catch (error) {

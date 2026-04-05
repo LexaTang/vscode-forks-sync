@@ -10,30 +10,33 @@ const { activate, deactivate } = defineExtension(async (ctx: ExtensionContext) =
   const recorder = new MetaRecorder()
   const configWatcher = new ConfigWatcher(ctx, recorder)
 
-  commands.registerCommand(
-    'vscode-forks-sync.syncProfile',
-    () => syncProfile(ctx, recorder, { prompt: false, configWatcher }),
-  )
-  commands.registerCommand(
-    'vscode-forks-sync.syncSettings',
-    () => syncSettings(ctx, recorder),
-  )
-  commands.registerCommand(
-    'vscode-forks-sync.syncKeybindings',
-    () => syncKeybindings(ctx, recorder),
-  )
-  commands.registerCommand(
-    'vscode-forks-sync.syncExtensions',
-    () => syncExtensions(ctx, recorder, {
-      prompt: config.promptOnExtensionSync,
-      configWatcher,
-    }),
+  ctx.subscriptions.push(
+    commands.registerCommand(
+      'vscode-forks-sync.syncProfile',
+      () => syncProfile(ctx, recorder, { prompt: false, configWatcher }),
+    ),
+    commands.registerCommand(
+      'vscode-forks-sync.syncSettings',
+      () => syncSettings(ctx, recorder, { configWatcher }),
+    ),
+    commands.registerCommand(
+      'vscode-forks-sync.syncKeybindings',
+      () => syncKeybindings(ctx, recorder, { configWatcher }),
+    ),
+    commands.registerCommand(
+      'vscode-forks-sync.syncExtensions',
+      () => syncExtensions(ctx, recorder, {
+        prompt: config.promptOnExtensionSync,
+        configWatcher,
+      }),
+    ),
   )
 
   if (config.autoSync) {
-    syncProfile(ctx, recorder, {
+    await syncProfile(ctx, recorder, {
       prompt: config.promptOnAutoSync,
       silent: !config.promptOnAutoSync,
+      configWatcher,
     })
   }
 

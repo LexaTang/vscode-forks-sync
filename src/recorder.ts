@@ -1,4 +1,4 @@
-import type { AppName, AppSyncMeta, SyncMeta, SyncType } from './types'
+import type { AppName, AppSyncMeta, SettingsSyncChanges, SyncMeta, SyncType } from './types'
 import { env, Uri, workspace } from 'vscode'
 import { DEFAULT_SYNC_META } from './constants'
 import { jsonParse, jsonStringify } from './json'
@@ -11,19 +11,10 @@ export class MetaRecorder {
 
   constructor() {
     this.appName = env.appName as AppName
-    this.ensure()
   }
 
   getAppName(): AppName {
     return this.appName
-  }
-
-  private getStoragePath(key: SyncType): Uri {
-    switch (key) {
-      case 'settings': return getStorageFileUri('settings.json')
-      case 'extensions': return getStorageFileUri('extensions.json')
-      case 'keybindings': return getStorageFileUri('keybindings.json')
-    }
   }
 
   private async ensure(): Promise<void> {
@@ -39,7 +30,6 @@ export class MetaRecorder {
   }
 
   private async write(meta: SyncMeta): Promise<void> {
-    // Keep keys sorted for stable diffs
     const sorted = Object.keys(meta).sort().reduce((acc, key) => {
       acc[key as AppName] = meta[key as AppName]
       return acc
@@ -47,10 +37,23 @@ export class MetaRecorder {
     await writeStorageFile(this.filename, jsonStringify(sorted))
   }
 
+  private getStoragePath(key: SyncType): Uri {
+    switch (key) {
+      case 'settings': return getStorageFileUri('settings.json')
+      case 'extensions': return getStorageFileUri('extensions.json')
+      case 'keybindings': return getStorageFileUri('keybindings.json')
+    }
+  }
+
   async getStorageMtime(key: SyncType): Promise<number> {
     const uri = this.getStoragePath(key)
-    const stat = await workspace.fs.stat(Uri.file(uri.fsPath))
-    return stat.mtime
+    try {
+      const stat = await workspace.fs.stat(Uri.file(uri.fsPath))
+      return stat.mtime
+    }
+    catch {
+      return 0
+    }
   }
 
   async getMtime(type: SyncType, app: AppName = this.appName): Promise<number | undefined> {
@@ -64,71 +67,44 @@ export class MetaRecorder {
     await this.write(meta)
   }
 
-  /**
-   * Compare the storage file's disk mtime against the last time *this IDE*
-   * uploaded.
-   *
-   * Returns:
-   *   1  → storage is newer (pull from storage)
-   *  -1  → local is newer  (push to storage)
-   *   0  → in sync
-   */
   async compareMtime(type: SyncType, storagePath: string, appPath: string): Promise<1 | -1 | 0 | undefined> {
     try {
-      const storageMtime = await this.getStorageMtime(type)
-      const recordedMtime = await this.getMtime(type, this.appName)
-
-      logger.info(`compare ${type} mtime: storage=${storageMtime} recorded=${recordedMtime}`)
-
-      if (!storageMtime)
-        return -1 // no storage file yet → push
-      if (!recordedMtime) {
-        await this.updateMtime(type)
-        return 1 // we've never synced → pull
-      }
-      if (storageMtime > recordedMtime)
-        return 1
-      else if (storageMtime < recordedMtime)
+      const hasStorage = await storageFileExists(`${type}.json`)
+      if (!hasStorage)
         return -1
-      else
-        return 0
+
+      const result = await compareFsMtime(storagePath, appPath)
+      logger.info(`compare ${type} mtime result: ${result}`)
+      return result
     }
     catch (error) {
       logger.error(`Failed to compare ${type} mtime`, error)
-      return await compareFsMtime(storagePath, appPath)
+      return undefined
     }
   }
 
-  // ─── Per-key settings timestamps (merge mode) ───────────────────────────────
-
-  /**
-   * Record a batch of settings key → timestamp updates for this IDE.
-   * Called after we detect which keys changed relative to the last snapshot.
-   */
-  async updateSettingsKeys(changedKeys: string[], timestamp: number = Date.now()): Promise<void> {
+  async applySettingsChanges(changes: SettingsSyncChanges, timestamp: number = Date.now(), app: AppName = this.appName): Promise<void> {
     const meta = await this.read()
-    const appMeta: AppSyncMeta = meta[this.appName] ?? {}
-    const existing = appMeta.settingsKeys ?? {}
-    for (const key of changedKeys)
-      existing[key] = timestamp
-    appMeta.settingsKeys = existing
-    meta[this.appName] = appMeta
+    const appMeta: AppSyncMeta = meta[app] ?? {}
+    const valueMap = { ...(appMeta.settingsKeys ?? {}) }
+    const tombstoneMap = { ...(appMeta.settingsTombstones ?? {}) }
+
+    for (const key of changes.upserted) {
+      valueMap[key] = timestamp
+      delete tombstoneMap[key]
+    }
+
+    for (const key of changes.deleted) {
+      tombstoneMap[key] = timestamp
+      delete valueMap[key]
+    }
+
+    appMeta.settingsKeys = valueMap
+    appMeta.settingsTombstones = tombstoneMap
+    meta[app] = appMeta
     await this.write(meta)
   }
 
-  /**
-   * Get the timestamp for a specific settings key as written by a particular IDE.
-   * Returns 0 if never recorded.
-   */
-  async getSettingsKeyMtime(key: string, app: AppName = this.appName): Promise<number> {
-    const meta = await this.read()
-    return meta[app]?.settingsKeys?.[key] ?? 0
-  }
-
-  /**
-   * Read the *full* SyncMeta — used by the merger to build the global key-level
-   * timestamp map across all IDEs.
-   */
   async readAll(): Promise<SyncMeta> {
     return this.read()
   }

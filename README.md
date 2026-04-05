@@ -1,37 +1,83 @@
 # Fork Sync
 
-**Synchronize settings, keybindings and extensions across VSCode and its forks** (Cursor, Windsurf, VSCodium, etc.) using a local shared directory — no GitHub Gist required.
+Use a local shared folder to sync `settings.json`, `keybindings.json`, and extensions across VS Code forks such as VS Code, Cursor, Windsurf, and VSCodium.
 
-## Features
+## What it does
 
-- **Local-only sync** — all data lives in a folder you control (`~/.vscode-forks-sync` by default)
-- **Per-IDE sync timestamps** — each IDE independently tracks when it last synced each config type
-- **Smart settings merge** — choose between _override_ (last-write-wins by file) or _merge_ (per-key last-write-wins) modes
-- **Key blacklist & whitelist** — exclude machine-specific keys (e.g. `telemetry.*`) or sync only a curated set via glob patterns
-- **Failure-safe extension list** — extensions are tracked per-IDE; a failed install in one IDE never removes extensions contributed by another
-- **Configurable extension gallery** — defaults to [open-vsx.org](https://open-vsx.org) with VS Marketplace as fallback for VSIX downloads
+- Local-only sync, no Gist or cloud account
+- Per-IDE sync timestamps
+- `settings.json` supports `override` and per-key `merge`
+- `keybindings.json` stays whole-file sync by design
+- Settings blacklist / whitelist with glob patterns
+- Poka-yoke confirmation before large settings overwrites
+- Extension union sync so failed installs in one IDE do not remove entries from another
+- Open VSX-style gallery config with VS Marketplace fallback for VSIX lookup
+- Automatic local backup before writing `settings.json` or `keybindings.json`
 
-## Supported IDEs
+## Settings behavior
 
-- Visual Studio Code
-- Visual Studio Code Insiders
-- Cursor
-- Windsurf / Windsurf Next
-- VSCodium / VSCodium Insiders
-- Antigravity
+### `settings.mergeMode`
 
-## Configuration
+- `override`: replace the synced settings subset with the storage version
+- `merge`: per-key last-write-wins using per-IDE snapshots and delete tombstones
 
-| Setting | Default | Description |
-|---|---|---|
+Only keys inside the sync scope are touched. Keys outside the scope always stay local.
+
+### Sync scope
+
+- `vscode-forks-sync.settings.excludeKeys`: keys excluded from sync
+- `vscode-forks-sync.settings.includeKeys`: optional whitelist; when non-empty, only matching keys sync
+
+Both support glob patterns such as `editor.*` or `terminal.integrated.*`.
+
+Default exclusions include `vscode-forks-sync.*` so the extension does not overwrite its own machine-specific settings.
+
+### Poka-yoke
+
+`vscode-forks-sync.settings.pokaYokeThreshold` controls when Fork Sync asks for confirmation before applying a large settings pull.
+
+## Keybindings behavior
+
+`keybindings.json` is not merged per key. It is synced as a whole file because array-based keybindings are not safe to reconcile with the same strategy as settings.
+
+## Extension behavior
+
+`extensions.json` stores per-IDE successful installs plus a merged union list. Failed installs are recorded and preserved, and you can add them to a per-IDE exclude list if a fork cannot install them.
+
+`vscode-forks-sync.extensionsGallery` is meant for Open VSX-compatible galleries. Fork Sync uses `serviceUrl` for Open VSX-style registries and falls back to VS Marketplace if lookup fails.
+
+## Backups
+
+Before Fork Sync writes local `settings.json` or `keybindings.json`, it creates a backup in the shared storage folder.
+
+Default layout:
+
+```text
+~/.vscode-forks-sync/
+  .backups/
+    settings/
+      <AppName>-YYYYMMDD-HHmmss.json
+    keybindings/
+      <AppName>-YYYYMMDD-HHmmss.json
+```
+
+You restore manually by copying a backup over your local file.
+
+## Main settings
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
 | `vscode-forks-sync.storagePath` | `~/.vscode-forks-sync` | Shared sync directory |
 | `vscode-forks-sync.autoSync` | `true` | Sync on startup |
-| `vscode-forks-sync.settings.mergeMode` | `merge` | `override` or `merge` |
-| `vscode-forks-sync.settings.excludeKeys` | `[...]` | Keys never synced (glob patterns) |
-| `vscode-forks-sync.settings.useIncludeKeys` | `false` | Enable whitelist mode |
-| `vscode-forks-sync.settings.includeKeys` | `[]` | Keys to sync in whitelist mode |
-| `vscode-forks-sync.extensions.excludeExtensions` | `[]` | Extensions never synced |
-| `vscode-forks-sync.extensionsGallery` | open-vsx | Gallery for VSIX downloads |
+| `vscode-forks-sync.promptOnAutoSync` | `true` | Ask before startup sync |
+| `vscode-forks-sync.promptOnExtensionSync` | `true` | Ask before applying extension changes |
+| `vscode-forks-sync.settings.mergeMode` | `merge` | `override` or per-key `merge` |
+| `vscode-forks-sync.settings.excludeKeys` | built-in defaults | Excluded settings glob patterns |
+| `vscode-forks-sync.settings.includeKeys` | `[]` | Optional whitelist glob patterns |
+| `vscode-forks-sync.settings.pokaYokeThreshold` | `10` | Confirm large settings pulls |
+| `vscode-forks-sync.backupBeforeLocalWrite` | `true` | Backup before local settings/keybindings writes |
+| `vscode-forks-sync.extensions.excludeExtensions` | `[]` | Excluded extension glob patterns |
+| `vscode-forks-sync.extensionsGallery` | Open VSX | Open VSX-style gallery descriptor |
 
 ## License
 

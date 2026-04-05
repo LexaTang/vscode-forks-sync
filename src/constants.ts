@@ -12,6 +12,8 @@ export const EDITOR_CONFIG_NAME_MAP = {
   'Windsurf Next': 'Windsurf Next',
 } as const
 
+export const APP_NAMES = Object.keys(EDITOR_CONFIG_NAME_MAP) as (keyof typeof EDITOR_CONFIG_NAME_MAP)[]
+
 export const DEFAULT_SYNC_META: SyncMeta = {}
 
 export const VSCODE_MARKETPLACE_QUERY_URL = 'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery'

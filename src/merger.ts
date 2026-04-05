@@ -1,133 +1,141 @@
-import type { SyncMeta } from './types'
+import type { AppName, MergeSettingsResult, SettingsSyncChanges, SyncMeta } from './types'
 import micromatch from 'micromatch'
 import { config } from './config'
 import { jsonParse, jsonStringify } from './json'
 import { logger } from './utils'
 
-// ─── Key filtering ─────────────────────────────────────────────────────────────
+function getWhitelistPatterns(): string[] {
+  return ((config['settings.includeKeys'] as string[] | undefined) ?? []).filter(Boolean)
+}
 
-/**
- * Apply whitelist + blacklist key filters to a flat settings object.
- *
- * Order of operations:
- *   1. If useIncludeKeys is true, keep only keys matching includeKeys patterns.
- *   2. Remove any keys matching excludeKeys patterns.
- */
+function getExcludePatterns(): string[] {
+  return ((config['settings.excludeKeys'] as string[] | undefined) ?? []).filter(Boolean)
+}
+
+export function isKeyIncluded(key: string): boolean {
+  const includePatterns = getWhitelistPatterns()
+  if (includePatterns.length === 0)
+    return true
+  return micromatch.isMatch(key, includePatterns)
+}
+
+export function isKeyExcluded(key: string): boolean {
+  const excludePatterns = getExcludePatterns()
+  if (excludePatterns.length === 0)
+    return false
+  return micromatch.isMatch(key, excludePatterns)
+}
+
+export function shouldSyncKey(key: string): boolean {
+  return isKeyIncluded(key) && !isKeyExcluded(key)
+}
+
 export function filterSettingsKeys(settings: Record<string, unknown>): Record<string, unknown> {
-  const includePatterns: string[] = (config['settings.includeKeys'] as string[]) ?? []
-  const excludePatterns: string[] = (config['settings.excludeKeys'] as string[]) ?? []
-  const useWhitelist: boolean = (config['settings.useIncludeKeys'] as boolean) ?? false
-
-  let keys = Object.keys(settings)
-
-  // 1. Whitelist filter
-  if (useWhitelist && includePatterns.length > 0) {
-    keys = micromatch(keys, includePatterns)
-  }
-
-  // 2. Blacklist filter
-  if (excludePatterns.length > 0) {
-    const excluded = new Set(micromatch(keys, excludePatterns))
-    keys = keys.filter(k => !excluded.has(k))
-  }
-
-  return Object.fromEntries(keys.map(k => [k, settings[k]]))
+  return Object.fromEntries(
+    Object.entries(settings).filter(([key]) => shouldSyncKey(key)),
+  )
 }
 
-// ─── Override mode ─────────────────────────────────────────────────────────────
-
-/**
- * Simple whole-file override: return `incoming` filtered through key rules.
- * Used when mergeMode === 'override'.
- */
-export function overrideSettings(incoming: Record<string, unknown>): Record<string, unknown> {
-  return filterSettingsKeys(incoming)
-}
-
-// ─── Merge mode ────────────────────────────────────────────────────────────────
-
-/**
- * Compute which keys changed between the previous snapshot and the current state.
- * Returns the set of changed key names.
- */
 export function diffSettingsKeys(
   previous: Record<string, unknown>,
   current: Record<string, unknown>,
-): string[] {
-  const changed: string[] = []
-  const allKeys = new Set([...Object.keys(previous), ...Object.keys(current)])
+): SettingsSyncChanges {
+  const filteredPrevious = filterSettingsKeys(previous)
+  const filteredCurrent = filterSettingsKeys(current)
+  const upserted: string[] = []
+  const deleted: string[] = []
+  const allKeys = new Set([...Object.keys(filteredPrevious), ...Object.keys(filteredCurrent)])
 
   for (const key of allKeys) {
-    const prev = JSON.stringify(previous[key])
-    const curr = JSON.stringify(current[key])
-    if (prev !== curr)
-      changed.push(key)
+    const hasPrev = key in filteredPrevious
+    const hasCurrent = key in filteredCurrent
+
+    if (!hasCurrent && hasPrev) {
+      deleted.push(key)
+      continue
+    }
+
+    if (hasCurrent && (!hasPrev || JSON.stringify(filteredPrevious[key]) !== JSON.stringify(filteredCurrent[key])))
+      upserted.push(key)
   }
 
-  return changed
+  return { upserted, deleted }
 }
 
-/**
- * Build the authoritative merged settings object from the last storage snapshot
- * and the SyncMeta (which contains per-key timestamps per IDE).
- *
- * Algorithm:
- *   For every key that appears in any IDE's settingsKeys map:
- *     - find the IDE that last wrote it (highest timestamp)
- *     - use that IDE's value from the `ideSnapshots` map
- *
- * Keys that appear in `storageSnapshot` but no IDE has a timestamp for are kept
- * from storageSnapshot (legacy / first-time).
- *
- * Keys in `localSettings` (current IDE) that have never been tracked at all are
- * preserved (local-only keys survive).
- */
+export function buildMergedSettings(
+  syncMeta: SyncMeta,
+  ideSnapshots: Map<AppName, Record<string, unknown>>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = {}
+  const trackedKeys = new Set<string>()
+
+  for (const appMeta of Object.values(syncMeta)) {
+    Object.keys(appMeta?.settingsKeys ?? {}).forEach(key => trackedKeys.add(key))
+    Object.keys(appMeta?.settingsTombstones ?? {}).forEach(key => trackedKeys.add(key))
+  }
+
+  for (const key of trackedKeys) {
+    let latestValueTimestamp = 0
+    let latestTombstoneTimestamp = 0
+    let winningIde: AppName | undefined
+
+    for (const [ideName, appMeta] of Object.entries(syncMeta) as [AppName, SyncMeta[AppName]][]) {
+      const valueTimestamp = appMeta?.settingsKeys?.[key] ?? 0
+      const tombstoneTimestamp = appMeta?.settingsTombstones?.[key] ?? 0
+
+      if (valueTimestamp > latestValueTimestamp) {
+        latestValueTimestamp = valueTimestamp
+        winningIde = ideName
+      }
+
+      if (tombstoneTimestamp > latestTombstoneTimestamp)
+        latestTombstoneTimestamp = tombstoneTimestamp
+    }
+
+    if (!winningIde || latestTombstoneTimestamp >= latestValueTimestamp)
+      continue
+
+    const snapshot = ideSnapshots.get(winningIde)
+    if (snapshot && key in snapshot)
+      merged[key] = snapshot[key]
+  }
+
+  return merged
+}
+
+export function applySyncedSettings(
+  localSettings: Record<string, unknown>,
+  syncedSettings: Record<string, unknown>,
+): MergeSettingsResult {
+  const result: Record<string, unknown> = { ...localSettings }
+  const localSyncKeys = Object.keys(filterSettingsKeys(localSettings))
+  const affectedKeys = new Set([...localSyncKeys, ...Object.keys(syncedSettings)])
+  const overriddenKeys: string[] = []
+
+  for (const key of localSyncKeys)
+    delete result[key]
+
+  for (const [key, value] of Object.entries(syncedSettings))
+    result[key] = value
+
+  for (const key of affectedKeys) {
+    if (JSON.stringify(localSettings[key]) !== JSON.stringify(result[key]))
+      overriddenKeys.push(key)
+  }
+
+  return {
+    syncedSettings: result,
+    overriddenKeys,
+  }
+}
+
 export function mergeSettings(
-  storageSnapshot: Record<string, unknown>,
   localSettings: Record<string, unknown>,
   syncMeta: SyncMeta,
-  ideSnapshots: Map<string, Record<string, unknown>>,
-  currentIde: string,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = { ...storageSnapshot }
-
-  // Collect every key that any IDE has a recorded timestamp for
-  const allTrackedKeys = new Set<string>()
-  for (const appMeta of Object.values(syncMeta)) {
-    for (const key of Object.keys(appMeta?.settingsKeys ?? {}))
-      allTrackedKeys.add(key)
-  }
-
-  for (const key of allTrackedKeys) {
-    let bestTimestamp = 0
-    let bestValue: unknown = storageSnapshot[key]
-
-    for (const [ideName, appMeta] of Object.entries(syncMeta)) {
-      const ts = appMeta?.settingsKeys?.[key] ?? 0
-      if (ts > bestTimestamp) {
-        const snapshot = ideSnapshots.get(ideName)
-        if (snapshot && key in snapshot) {
-          bestTimestamp = ts
-          bestValue = snapshot[key]
-        }
-      }
-    }
-
-    result[key] = bestValue
-  }
-
-  // Preserve local-only keys (never synced by anyone)
-  for (const [key, value] of Object.entries(localSettings)) {
-    if (!allTrackedKeys.has(key) && !(key in storageSnapshot)) {
-      result[key] = value
-    }
-  }
-
-  // Apply key filters before returning
-  return filterSettingsKeys(result)
+  ideSnapshots: Map<AppName, Record<string, unknown>>,
+): MergeSettingsResult {
+  return applySyncedSettings(localSettings, buildMergedSettings(syncMeta, ideSnapshots))
 }
-
-// ─── Parse/stringify helpers ───────────────────────────────────────────────────
 
 export function parseSettings(raw: string): Record<string, unknown> {
   try {

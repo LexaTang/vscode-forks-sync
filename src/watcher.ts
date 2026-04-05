@@ -1,37 +1,71 @@
 import type { ExtensionContext, FileSystemWatcher, Uri } from 'vscode'
 import type { MetaRecorder } from './recorder'
-import { extensions, workspace } from 'vscode'
-import { codeName } from './config'
-import { diffSettingsKeys, parseSettings, stringifySettings } from './merger'
+import type { AppName, SyncType } from './types'
+import { env, extensions, workspace } from 'vscode'
+import { APP_NAMES } from './constants'
+import {
+  buildMergedSettings,
+  diffSettingsKeys,
+  filterSettingsKeys,
+  parseSettings,
+  stringifySettings,
+} from './merger'
 import { getKeybindings, getSettings } from './profile'
 import {
   getLocalExtensions,
   readExtensionStorage,
   writeExtensionStorage,
 } from './extensions'
-import { readStorageFile, storageFileExists, writeStorageFile } from './storage'
+import {
+  ensureStorageDirectory,
+  readAllSettingsSnapshots,
+  readSettingsSnapshot,
+  writeSettingsSnapshot,
+  writeStorageFile,
+} from './storage'
 import { findConfigFile, logger } from './utils'
-import type { AppName } from './types'
-import { env } from 'vscode'
 
 export class ConfigWatcher {
   private ctx: ExtensionContext
   private recorder: MetaRecorder
   private keybindingsWatcher?: FileSystemWatcher
   private debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
+  private suppressions: Record<SyncType, number> = {
+    settings: 0,
+    keybindings: 0,
+    extensions: 0,
+  }
   private prevSettingsRaw?: string
-  private isSyncingExtensions: boolean = false
+  private prevKeybindingsRaw?: string
 
   constructor(ctx: ExtensionContext, recorder: MetaRecorder) {
     this.ctx = ctx
     this.recorder = recorder
   }
 
-  setSyncingExtensions(value: boolean): void {
-    this.isSyncingExtensions = value
+  rememberContent(type: 'settings' | 'keybindings', raw: string): void {
+    if (type === 'settings')
+      this.prevSettingsRaw = raw
+    else
+      this.prevKeybindingsRaw = raw
+  }
+
+  async runWithSuppressed(type: SyncType, fn: () => Promise<void>): Promise<void> {
+    this.suppressions[type] += 1
+    try {
+      await fn()
+    }
+    finally {
+      this.suppressions[type] = Math.max(0, this.suppressions[type] - 1)
+    }
+  }
+
+  private isSuppressed(type: SyncType): boolean {
+    return this.suppressions[type] > 0
   }
 
   async start(): Promise<void> {
+    await this.primeKnownContent()
     this.watchSettings()
     this.watchExtensions()
     await this.watchKeybindings()
@@ -45,12 +79,27 @@ export class ConfigWatcher {
     logger.info('Config watcher disposed')
   }
 
-  // ─── Settings watcher ──────────────────────────────────────────────────────
+  private async primeKnownContent(): Promise<void> {
+    const [settingsPath, keybindingsPath] = await Promise.all([
+      findConfigFile(this.ctx, 'settings.json'),
+      findConfigFile(this.ctx, 'keybindings.json'),
+    ])
+
+    if (settingsPath)
+      this.prevSettingsRaw = await getSettings(settingsPath)
+
+    if (keybindingsPath)
+      this.prevKeybindingsRaw = await getKeybindings(keybindingsPath)
+  }
 
   private watchSettings(): void {
     const disposable = workspace.onDidChangeConfiguration(() => {
+      if (this.isSuppressed('settings'))
+        return
+
       this.debounce('settings', async () => {
         try {
+          const currentIde = env.appName as AppName
           const settingsPath = await findConfigFile(this.ctx, 'settings.json')
           if (!settingsPath)
             return
@@ -59,32 +108,32 @@ export class ConfigWatcher {
           if (!raw || raw === this.prevSettingsRaw)
             return
 
-          const hasStorage = await storageFileExists('settings.json')
+          await ensureStorageDirectory()
 
-          if (!hasStorage) {
-            await writeStorageFile('settings.json', raw)
-            await this.recorder.updateMtime('settings')
+          const currentSettings = parseSettings(raw)
+          const previousSnapshot = parseSettings((await readSettingsSnapshot(currentIde)) ?? '{}')
+          const changes = diffSettingsKeys(previousSnapshot, currentSettings)
+
+          if (changes.upserted.length === 0 && changes.deleted.length === 0) {
             this.prevSettingsRaw = raw
             return
           }
 
-          // Detect changed keys and update timestamps
-          const storageRaw = await readStorageFile('settings.json')
-          const prevSettings = parseSettings(storageRaw)
-          const nowSettings = parseSettings(raw)
-          const changedKeys = diffSettingsKeys(prevSettings, nowSettings)
+          const filteredCurrent = filterSettingsKeys(currentSettings)
+          const timestamp = Date.now()
 
-          if (changedKeys.length > 0) {
-            await this.recorder.updateSettingsKeys(changedKeys)
-            logger.info(`Watcher: tracked ${changedKeys.length} changed settings keys`)
-          }
+          await this.recorder.applySettingsChanges(changes, timestamp, currentIde)
+          await writeSettingsSnapshot(currentIde, stringifySettings(filteredCurrent))
 
-          // Write a new merged snapshot
-          await writeStorageFile('settings.json', stringifySettings({ ...prevSettings, ...nowSettings }))
-          await this.recorder.updateMtime('settings')
+          const merged = buildMergedSettings(
+            await this.recorder.readAll(),
+            await readAllSettingsSnapshots(APP_NAMES),
+          )
+          await writeStorageFile('settings.json', stringifySettings(merged))
+          await this.recorder.updateMtime('settings', currentIde, timestamp)
           this.prevSettingsRaw = raw
 
-          logger.info('Watcher: settings synced to storage')
+          logger.info(`Watcher: settings synced to storage (${changes.upserted.length} updated, ${changes.deleted.length} deleted)`) 
         }
         catch (error) {
           logger.error('Watcher: failed to sync settings', error)
@@ -94,11 +143,9 @@ export class ConfigWatcher {
     this.ctx.subscriptions.push(disposable)
   }
 
-  // ─── Extensions watcher ────────────────────────────────────────────────────
-
   private watchExtensions(): void {
     const disposable = extensions.onDidChange(() => {
-      if (this.isSyncingExtensions) {
+      if (this.isSuppressed('extensions')) {
         logger.info('Watcher: skipping extension sync (currently syncing)')
         return
       }
@@ -120,8 +167,6 @@ export class ConfigWatcher {
     this.ctx.subscriptions.push(disposable)
   }
 
-  // ─── Keybindings watcher ───────────────────────────────────────────────────
-
   private async watchKeybindings(): Promise<void> {
     const keybindingsPath = await findConfigFile(this.ctx, 'keybindings.json')
     if (!keybindingsPath) {
@@ -131,11 +176,19 @@ export class ConfigWatcher {
 
     this.keybindingsWatcher = workspace.createFileSystemWatcher(keybindingsPath)
     this.keybindingsWatcher.onDidChange(async (_uri: Uri) => {
+      if (this.isSuppressed('keybindings'))
+        return
+
       this.debounce('keybindings', async () => {
         try {
           const content = await getKeybindings(keybindingsPath)
+          if (content === this.prevKeybindingsRaw)
+            return
+
+          await ensureStorageDirectory()
           await writeStorageFile('keybindings.json', content)
           await this.recorder.updateMtime('keybindings')
+          this.prevKeybindingsRaw = content
           logger.info('Watcher: keybindings synced to storage')
         }
         catch (error) {
@@ -146,8 +199,6 @@ export class ConfigWatcher {
 
     this.ctx.subscriptions.push(this.keybindingsWatcher)
   }
-
-  // ─── Debounce helper ───────────────────────────────────────────────────────
 
   private debounce(key: string, fn: () => Promise<void>, delay = 500): void {
     const existing = this.debounceTimers.get(key)

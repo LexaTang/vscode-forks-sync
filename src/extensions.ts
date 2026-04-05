@@ -2,11 +2,13 @@ import type { ExtensionConfig, ExtensionStorage, ExtensionsDiff } from './types'
 import type { ConfigWatcher } from './watcher'
 import type { MetaRecorder } from './recorder'
 import { commands, extensions, ProgressLocation, Uri, window } from 'vscode'
+import micromatch from 'micromatch'
+import { DEFAULT_EXTENSIONS_GALLERY } from './constants'
 import { config } from './config'
 import { downloadVsixPackage } from './downloader'
 import { displayName, extensionId } from './generated/meta'
 import { jsonParse, jsonStringify } from './json'
-import { getStorageFileUri, readStorageFile, storageFileExists, writeStorageFile } from './storage'
+import { readStorageFile, storageFileExists, writeStorageFile } from './storage'
 import { logger, readFile } from './utils'
 import type { AppName } from './types'
 import { join, dirname } from 'node:path'
@@ -44,12 +46,15 @@ export async function getUserExtensionIds(): Promise<string[]> {
 }
 
 function normalizeIds(ids: string[], perIdeExcludes: string[] = []): string[] {
-  const globalExcluded = ((config['extensions.excludeExtensions'] as string[] | undefined) ?? [])
-    .map(id => id.toLowerCase())
-  const allExcluded = new Set([...globalExcluded, ...perIdeExcludes.map(id => id.toLowerCase())])
+  const patterns = [
+    ...(((config['extensions.excludeExtensions'] as string[] | undefined) ?? []).map(id => id.toLowerCase())),
+    ...perIdeExcludes.map(id => id.toLowerCase()),
+  ]
+
   return ids
     .map(id => id.toLowerCase())
-    .filter(id => !allExcluded.has(id) && id !== extensionId.toLowerCase())
+    .filter(id => id !== extensionId.toLowerCase())
+    .filter(id => patterns.length === 0 || !micromatch.isMatch(id, patterns, { nocase: true }))
 }
 
 /** Read per-IDE exclude list from the stored extensions.json. */
@@ -104,17 +109,18 @@ export async function writeExtensionStorage(
   existing: ExtensionStorage | null,
 ): Promise<void> {
   const perIde = existing?.perIde ? { ...existing.perIde } : {} as Partial<Record<AppName, string[]>>
-  perIde[currentIde] = normalizeIds(successfulIds)
+  perIde[currentIde] = normalizeIds(successfulIds, existing?.excludePerIde?.[currentIde] ?? [])
 
-  const gallery = (config.extensionsGallery as ExtensionStorage['gallery']) ?? {
-    serviceUrl: 'https://open-vsx.org/vscode/gallery',
-    itemUrl: 'https://open-vsx.org/vscode/item',
-  }
+  const gallery = (config.extensionsGallery as ExtensionStorage['gallery'] | undefined)
+    ?? existing?.gallery
+    ?? DEFAULT_EXTENSIONS_GALLERY
 
   const storage: ExtensionStorage = {
     gallery,
     perIde,
     merged: computeMerged(perIde),
+    failedInstalls: existing?.failedInstalls,
+    excludePerIde: existing?.excludePerIde,
   }
 
   await writeStorageFile(EXTENSIONS_FILE, jsonStringify(storage))
@@ -178,20 +184,18 @@ export async function applyExtensions(
       const details: string[] = [`${displayName} - Extension Sync Details\n`]
       if (toInstall.length > 0)
         details.push('Installing:', ...toInstall.map(e => `  • ${e}`), '\n')
-      if (toDelete.length > 0) {
+      if (toDelete.length > 0)
         details.push('Removing:', ...toDelete.map(e => `  • ${e}`), '\n')
-      }
-      
+
       const { workspace } = await import('vscode')
       const doc = await workspace.openTextDocument({
         content: details.join('\n'),
         language: 'markdown',
       })
       await window.showTextDocument(doc)
-      
+
       const result = await window.showInformationMessage(
         'Review the changes. Do you want to continue?',
-        { modal: true },
         'Continue',
       )
       if (result !== 'Continue')
@@ -202,10 +206,11 @@ export async function applyExtensions(
     }
   }
 
-  if (watcher)
-    watcher.setSyncingExtensions(true)
+  const run = watcher
+    ? (fn: () => Promise<void>) => watcher.runWithSuppressed('extensions', fn)
+    : async (fn: () => Promise<void>) => await fn()
 
-  try {
+  await run(async () => {
     const failedToInstall: string[] = []
     let needsReload = false
 
@@ -216,7 +221,7 @@ export async function applyExtensions(
         cancellable: false,
       },
       async (progress) => {
-        const total = toInstall.length + toDelete.length
+        const total = Math.max(1, toInstall.length + toDelete.length)
         let completed = 0
 
         for (const id of toDelete) {
@@ -246,7 +251,6 @@ export async function applyExtensions(
       },
     )
 
-    // Try VSIX fallback for failed installs
     if (failedToInstall.length > 0) {
       const action = await window.showWarningMessage(
         formatMessage('Failed to install:', failedToInstall),
@@ -259,9 +263,9 @@ export async function applyExtensions(
       }
     }
 
-    // Update perIde based on what's now actually installed
     const nowInstalled = await getLocalExtensions()
-    await writeExtensionStorage(currentIde, nowInstalled, storage)
+    const latestStorage = await readExtensionStorage()
+    await writeExtensionStorage(currentIde, nowInstalled, latestStorage ?? storage)
     await recorder.updateMtime('extensions')
 
     if (needsReload) {
@@ -273,11 +277,7 @@ export async function applyExtensions(
       if (reload === 'Reload')
         await commands.executeCommand('workbench.action.reloadWindow')
     }
-  }
-  finally {
-    if (watcher)
-      watcher.setSyncingExtensions(false)
-  }
+  })
 }
 
 /**
@@ -295,23 +295,23 @@ export async function installFromVsix(
   const succeeded: string[] = []
   const failed: string[] = []
 
-  if (watcher)
-    watcher.setSyncingExtensions(true)
+  const run = watcher
+    ? (fn: () => Promise<void>) => watcher.runWithSuppressed('extensions', fn)
+    : async (fn: () => Promise<void>) => await fn()
 
-  try {
+  await run(async () => {
     await window.withProgress({
       location: ProgressLocation.Notification,
       title: 'Fork Sync: Downloading VSIX',
       cancellable: false,
     }, async (progress) => {
-      const total = ids.length
+      const total = Math.max(1, ids.length)
       let completed = 0
 
       for (const id of ids) {
         try {
           progress.report({ message: `Downloading ${id}...`, increment: (++completed / total) * 100 })
           const uri = await downloadVsixPackage(id, storage?.gallery ?? null)
-          // VSIX is kept in storage/vsix/ for future use — do NOT delete it
           await commands.executeCommand('workbench.extensions.installExtension', uri)
           succeeded.push(id)
           logger.info(`Installed ${id} from VSIX`)
@@ -323,23 +323,19 @@ export async function installFromVsix(
       }
     })
 
-    // ── Persist failed installs to extensions.json ──
     if (failed.length > 0) {
       const { env } = await import('vscode')
       const currentIde = env.appName as AppName
       const latestStorage = await readExtensionStorage()
-      const base = latestStorage ?? { perIde: {}, merged: [] } as ExtensionStorage
+      const base = latestStorage ?? { perIde: {}, merged: [], gallery: storage?.gallery ?? DEFAULT_EXTENSIONS_GALLERY } as ExtensionStorage
       const existingFailed = base.failedInstalls ? { ...base.failedInstalls } : {} as Partial<Record<AppName, string[]>>
-      // Merge with any existing failures (deduplicated)
       const prevFailed = existingFailed[currentIde] ?? []
       existingFailed[currentIde] = [...new Set([...prevFailed, ...failed])]
       await writeStorageFile(EXTENSIONS_FILE, jsonStringify({ ...base, failedInstalls: existingFailed }))
       logger.warn(`Persisted ${failed.length} failed install(s) to extensions.json for ${currentIde}: ${failed.join(', ')}`)
 
-      // ── Non-modal notification: offer to add to per-IDE exclude list ──
       const failedCount = failed.length
       const label = failedCount === 1 ? failed[0] : `${failedCount} extensions`
-      // showWarningMessage without { modal: true } is a non-blocking notification toast
       window.showWarningMessage(
         `Fork Sync: Could not install ${label} on ${currentIde}. Add to this IDE's exclude list to stop retrying?`,
         'Add to Exclude List',
@@ -347,7 +343,7 @@ export async function installFromVsix(
       ).then(async (action) => {
         if (action === 'Add to Exclude List') {
           const freshStorage = await readExtensionStorage()
-          const freshBase = freshStorage ?? { perIde: {}, merged: [] } as ExtensionStorage
+          const freshBase = freshStorage ?? { perIde: {}, merged: [], gallery: storage?.gallery ?? DEFAULT_EXTENSIONS_GALLERY } as ExtensionStorage
           const existingExcludes = freshBase.excludePerIde ? { ...freshBase.excludePerIde } : {} as Partial<Record<AppName, string[]>>
           const prevExcludes = existingExcludes[currentIde] ?? []
           existingExcludes[currentIde] = [...new Set([...prevExcludes, ...failed])]
@@ -375,11 +371,7 @@ export async function installFromVsix(
         }
       })
     }
-  }
-  finally {
-    if (watcher)
-      watcher.setSyncingExtensions(false)
-  }
+  })
 
   return { succeeded, failed }
 }
