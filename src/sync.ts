@@ -1,48 +1,83 @@
 import type { ExtensionContext } from 'vscode'
 import type { MetaRecorder } from './recorder'
-import type { ExtensionRecommendations, SyncCommandContext } from './types'
-import { window } from 'vscode'
+import type { SyncCommandContext } from './types'
+import { env, window } from 'vscode'
 import { codeName, config } from './config'
 import { displayName } from './generated/meta'
-import { jsonParse, jsonStringify, updateExtensionRecommendations } from './json'
-import { getExtensions, getExtensionsPath, getKeybindings, getSettings, setExtensions, setKeybindings, setSettings } from './profile'
-import { ensureStorageDirectory, getStorageFileUri, readStorageFile, storageFileExists, writeStorageFile } from './storage'
+import { jsonStringify } from './json'
+import {
+  diffSettingsKeys,
+  mergeSettings,
+  overrideSettings,
+  parseSettings,
+  stringifySettings,
+} from './merger'
+import { getKeybindings, getSettings, setKeybindings, setSettings } from './profile'
+import {
+  applyExtensions,
+  getLocalExtensions,
+  readExtensionStorage,
+  writeExtensionStorage,
+} from './extensions'
+import {
+  ensureStorageDirectory,
+  getStorageFileUri,
+  readStorageFile,
+  storageFileExists,
+  writeStorageFile,
+} from './storage'
 import { findConfigFile, logger } from './utils'
+import type { AppName } from './types'
 
-export async function syncProfile(ctx: ExtensionContext, recorder: MetaRecorder, options: SyncCommandContext = {}) {
+// ─── Full profile sync ────────────────────────────────────────────────────────
+
+export async function syncProfile(
+  ctx: ExtensionContext,
+  recorder: MetaRecorder,
+  options: SyncCommandContext = {},
+): Promise<void> {
   const { prompt = true, silent = false } = options
 
   let shouldSync = true
   if (prompt) {
-    const buttonSync = 'Sync'
-    const buttonSkip = 'Skip this time'
     const result = await window.showInformationMessage(
-      `${displayName}: do you want to sync your config?`,
-      buttonSync,
-      buttonSkip,
+      `${displayName}: Do you want to sync your config?`,
+      'Sync',
+      'Skip',
     )
-    shouldSync = result === buttonSync
+    shouldSync = result === 'Sync'
   }
 
-  if (shouldSync) {
-    await ensureStorageDirectory()
+  if (!shouldSync)
+    return
 
-    const opts = { ...options, silent: true }
-    await Promise.all([
-      syncSettings(ctx, recorder, opts),
-      syncKeybindings(ctx, recorder, opts),
-      syncExtensions(ctx, recorder, { ...opts, prompt: config.promptOnExtensionSync }),
-    ])
+  await ensureStorageDirectory()
 
-    if (!silent) {
-      window.showInformationMessage(`${displayName}: Config updated`)
-    }
-  }
+  const opts = { ...options, silent: true }
+  await Promise.all([
+    syncSettings(ctx, recorder, opts),
+    syncKeybindings(ctx, recorder, opts),
+    syncExtensions(ctx, recorder, {
+      ...opts,
+      prompt: config.promptOnExtensionSync,
+    }),
+  ])
+
+  if (!silent)
+    window.showInformationMessage(`${displayName}: Config updated`)
 }
 
-export async function syncSettings(_ctx: ExtensionContext, recorder: MetaRecorder, options: SyncCommandContext = {}) {
+// ─── Settings sync ────────────────────────────────────────────────────────────
+
+export async function syncSettings(
+  ctx: ExtensionContext,
+  recorder: MetaRecorder,
+  options: SyncCommandContext = {},
+): Promise<void> {
   const { silent = false } = options
-  const settingsPath = await findConfigFile(codeName, 'settings.json')
+  const currentIde = env.appName as AppName
+  const settingsPath = await findConfigFile(ctx, 'settings.json')
+
   if (!settingsPath) {
     logger.error('Settings file not found')
     if (!silent)
@@ -50,35 +85,102 @@ export async function syncSettings(_ctx: ExtensionContext, recorder: MetaRecorde
     return
   }
 
+  const localRaw = await getSettings(settingsPath)
+  const localSettings = parseSettings(localRaw)
+  const mergeMode = (config['settings.mergeMode'] as string) ?? 'merge'
   const hasStorage = await storageFileExists('settings.json')
+
+  // ── First sync: push local to storage ──
   if (!hasStorage) {
-    await writeStorageFile('settings.json', await getSettings(settingsPath))
+    const filtered = mergeMode === 'merge'
+      ? (() => {
+          // Record all existing keys as "owned by this IDE" at current time
+          const now = Date.now()
+          recorder.updateSettingsKeys(Object.keys(localSettings), now)
+          return localSettings
+        })()
+      : overrideSettings(localSettings)
+
+    await writeStorageFile('settings.json', stringifySettings(filtered))
     await recorder.updateMtime('settings')
+
     if (!silent)
-      window.showInformationMessage(`${displayName}: Settings file created`)
+      window.showInformationMessage(`${displayName}: Settings file initialized`)
     return
   }
 
+  // ── Subsequent syncs ──
   const storageUri = getStorageFileUri('settings.json')
-  const result = await recorder.compareMtime('settings', storageUri.fsPath, settingsPath)
+  const syncDirection = await recorder.compareMtime('settings', storageUri.fsPath, settingsPath)
 
-  if (result === 1) {
-    const settings = await readStorageFile('settings.json')
-    await setSettings(settingsPath, settings)
+  if (syncDirection === 1) {
+    // Storage is newer → pull into local
+    const storageRaw = await readStorageFile('settings.json')
+    const storageSettings = parseSettings(storageRaw)
+
+    if (mergeMode === 'merge') {
+      // Merge: only apply keys where storage has a newer timestamp than our local record
+      const syncMeta = await recorder.readAll()
+      const merged = mergeSettings(
+        storageSettings,
+        localSettings,
+        syncMeta,
+        new Map([[currentIde, localSettings]]),
+        currentIde,
+      )
+      await setSettings(settingsPath, stringifySettings(merged))
+    }
+    else {
+      // Override: whole-file replace
+      await setSettings(settingsPath, storageRaw)
+    }
+    logger.info('Settings: pulled from storage')
   }
-  else if (result === -1) {
-    const settings = await getSettings(settingsPath)
-    await writeStorageFile('settings.json', settings)
+  else if (syncDirection === -1) {
+    // Local is newer → push to storage
+    if (mergeMode === 'merge') {
+      const storageRaw = await readStorageFile('settings.json')
+      const storageSettings = parseSettings(storageRaw)
+      const changedKeys = diffSettingsKeys(storageSettings, localSettings)
+
+      if (changedKeys.length > 0) {
+        await recorder.updateSettingsKeys(changedKeys)
+        logger.info(`Settings: tracked ${changedKeys.length} changed keys`)
+      }
+
+      // Build a new merged snapshot combining storage and local changes
+      const syncMeta = await recorder.readAll()
+      const merged = mergeSettings(
+        storageSettings,
+        localSettings,
+        syncMeta,
+        new Map([[currentIde, localSettings]]),
+        currentIde,
+      )
+      await writeStorageFile('settings.json', stringifySettings(merged))
+    }
+    else {
+      await writeStorageFile('settings.json', stringifySettings(overrideSettings(localSettings)))
+    }
+
     await recorder.updateMtime('settings')
+    logger.info('Settings: pushed to storage')
   }
 
   if (!silent)
-    window.showInformationMessage(`${displayName}: Settings updated`)
+    window.showInformationMessage(`${displayName}: Settings synced`)
 }
 
-export async function syncKeybindings(_ctx: ExtensionContext, recorder: MetaRecorder, options: SyncCommandContext = {}) {
+// ─── Keybindings sync ─────────────────────────────────────────────────────────
+
+export async function syncKeybindings(
+  ctx: ExtensionContext,
+  recorder: MetaRecorder,
+  options: SyncCommandContext = {},
+): Promise<void> {
   const { silent = false } = options
-  const keybindingsPath = await findConfigFile(codeName, 'keybindings.json')
+  const keybindingsPath = await findConfigFile(ctx, 'keybindings.json')
+
   if (!keybindingsPath) {
     logger.error('Keybindings file not found')
     if (!silent)
@@ -91,60 +193,77 @@ export async function syncKeybindings(_ctx: ExtensionContext, recorder: MetaReco
     await writeStorageFile('keybindings.json', await getKeybindings(keybindingsPath))
     await recorder.updateMtime('keybindings')
     if (!silent)
-      window.showInformationMessage(`${displayName}: Keybindings file created`)
+      window.showInformationMessage(`${displayName}: Keybindings file initialized`)
     return
   }
 
   const storageUri = getStorageFileUri('keybindings.json')
-  const result = await recorder.compareMtime('keybindings', storageUri.fsPath, keybindingsPath)
+  const syncDirection = await recorder.compareMtime('keybindings', storageUri.fsPath, keybindingsPath)
 
-  if (result === 1) {
-    const keybindings = await readStorageFile('keybindings.json')
-    await setKeybindings(keybindingsPath, keybindings)
+  if (syncDirection === 1) {
+    await setKeybindings(keybindingsPath, await readStorageFile('keybindings.json'))
+    logger.info('Keybindings: pulled from storage')
   }
-  else if (result === -1) {
-    const keybindings = await getKeybindings(keybindingsPath)
-    await writeStorageFile('keybindings.json', keybindings)
+  else if (syncDirection === -1) {
+    await writeStorageFile('keybindings.json', await getKeybindings(keybindingsPath))
     await recorder.updateMtime('keybindings')
+    logger.info('Keybindings: pushed to storage')
   }
 
   if (!silent)
-    window.showInformationMessage(`${displayName}: Keybindings updated`)
+    window.showInformationMessage(`${displayName}: Keybindings synced`)
 }
 
-export async function syncExtensions(_ctx: ExtensionContext, recorder: MetaRecorder, options: SyncCommandContext = {}) {
+// ─── Extensions sync ──────────────────────────────────────────────────────────
+
+export async function syncExtensions(
+  _ctx: ExtensionContext,
+  recorder: MetaRecorder,
+  options: SyncCommandContext = {},
+): Promise<void> {
   const { prompt = true, silent = false } = options
-  const hasStorage = await storageFileExists('extensions.json')
-  if (!hasStorage) {
-    const extensions = { recommendations: await getExtensions() }
-    await writeStorageFile('extensions.json', jsonStringify(extensions))
+  const currentIde = env.appName as AppName
+
+  const storage = await readExtensionStorage()
+
+  // ── First sync: push local to storage ──
+  if (!storage) {
+    const localIds = await getLocalExtensions()
+    await writeExtensionStorage(currentIde, localIds, null)
     await recorder.updateMtime('extensions')
     if (!silent)
-      window.showInformationMessage(`${displayName}: Extensions file created`)
-    return
-  }
-
-  const extensions = await readStorageFile('extensions.json')
-  const extConfig = jsonParse<ExtensionRecommendations>(extensions)
-
-  const extensionsPath = getExtensionsPath()
-  if (!extensionsPath) {
-    await setExtensions(extConfig.recommendations, prompt, options.configWatcher)
+      window.showInformationMessage(`${displayName}: Extension list initialized`)
     return
   }
 
   const storageUri = getStorageFileUri('extensions.json')
-  const result = await recorder.compareMtime('extensions', storageUri.fsPath, extensionsPath)
+  const syncDirection = await recorder.compareMtime(
+    'extensions',
+    storageUri.fsPath,
+    // Use extensions directory mtime as the "local" reference
+    (() => {
+      try {
+        const { getExtensionsPath } = require('./extensions')
+        return getExtensionsPath() ?? storageUri.fsPath
+      }
+      catch {
+        return storageUri.fsPath
+      }
+    })(),
+  )
 
-  if (result === 1) {
-    await setExtensions(extConfig.recommendations, prompt, options.configWatcher)
+  if (syncDirection === 1) {
+    // Storage has merged list that's newer → install what we're missing
+    await applyExtensions(storage.merged, currentIde, storage, recorder, prompt, options.configWatcher)
   }
-  else if (result === -1) {
-    const content = updateExtensionRecommendations(extensions, await getExtensions())
-    await writeStorageFile('extensions.json', content)
+  else if (syncDirection === -1 || syncDirection === 0) {
+    // Local changed (or same) → update our perIde entry
+    const localIds = await getLocalExtensions()
+    await writeExtensionStorage(currentIde, localIds, storage)
     await recorder.updateMtime('extensions')
+    logger.info(`Extensions: pushed local list for ${currentIde}`)
   }
 
   if (!silent)
-    window.showInformationMessage(`${displayName}: Extensions updated`)
+    window.showInformationMessage(`${displayName}: Extensions synced`)
 }

@@ -4,6 +4,7 @@ import { env } from 'vscode'
 import { EDITOR_CONFIG_NAME_MAP } from './constants'
 import * as Meta from './generated/meta'
 
+/** The config directory name for the current IDE (e.g. "Code", "Cursor"). */
 export const codeName = EDITOR_CONFIG_NAME_MAP[env.appName as AppName]
 
 export const config = defineConfigObject<Meta.ScopedConfigKeyTypeMap>(

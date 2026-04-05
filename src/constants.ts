@@ -9,6 +9,14 @@ export const EDITOR_CONFIG_NAME_MAP = {
   'VSCodium - Insiders': 'VSCodium - Insiders',
   'VSCodium': 'VSCodium',
   'Windsurf': 'Windsurf',
+  'Windsurf Next': 'Windsurf Next',
 } as const
 
 export const DEFAULT_SYNC_META: SyncMeta = {}
+
+export const VSCODE_MARKETPLACE_QUERY_URL = 'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery'
+
+export const DEFAULT_EXTENSIONS_GALLERY = {
+  serviceUrl: 'https://open-vsx.org/vscode/gallery',
+  itemUrl: 'https://open-vsx.org/vscode/item',
+}

@@ -9,7 +9,6 @@ export function getStorageUri(): Uri {
 
 export async function ensureStorageDirectory(): Promise<void> {
   const storageUri = getStorageUri()
-
   try {
     await workspace.fs.stat(storageUri)
   }
@@ -20,9 +19,7 @@ export async function ensureStorageDirectory(): Promise<void> {
 }
 
 export async function storageFileExists(filename: string): Promise<boolean> {
-  const storageUri = getStorageUri()
-  const fileUri = Uri.joinPath(storageUri, filename)
-
+  const fileUri = Uri.joinPath(getStorageUri(), filename)
   try {
     await workspace.fs.stat(fileUri)
     return true
@@ -33,15 +30,12 @@ export async function storageFileExists(filename: string): Promise<boolean> {
 }
 
 export function getStorageFileUri(filename: string): Uri {
-  const storageUri = getStorageUri()
-  return Uri.joinPath(storageUri, filename)
+  return Uri.joinPath(getStorageUri(), filename)
 }
 
 export async function readStorageFile(filename: string): Promise<string> {
-  const fileUri = getStorageFileUri(filename)
-
   try {
-    return await readFile(fileUri)
+    return await readFile(getStorageFileUri(filename))
   }
   catch (error) {
     logger.error(`Failed to read storage file: ${filename}`, error)
@@ -50,9 +44,7 @@ export async function readStorageFile(filename: string): Promise<string> {
 }
 
 export async function writeStorageFile(filename: string, content: string): Promise<void> {
-  const storageUri = getStorageUri()
-  const fileUri = Uri.joinPath(storageUri, filename)
-
+  const fileUri = getStorageFileUri(filename)
   try {
     await workspace.fs.writeFile(fileUri, Buffer.from(content, 'utf-8'))
     logger.info(`Storage file updated: ${filename}`)

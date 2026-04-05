@@ -1,4 +1,4 @@
-import type { AppName, SyncMeta, SyncType } from './types'
+import type { AppName, AppSyncMeta, SyncMeta, SyncType } from './types'
 import { env, Uri, workspace } from 'vscode'
 import { DEFAULT_SYNC_META } from './constants'
 import { jsonParse, jsonStringify } from './json'
@@ -6,7 +6,7 @@ import { getStorageFileUri, readStorageFile, storageFileExists, writeStorageFile
 import { compareFsMtime, logger } from './utils'
 
 export class MetaRecorder {
-  private filename = 'crosside-sync.json'
+  private filename = 'vscode-forks-sync.json'
   private appName: AppName
 
   constructor() {
@@ -14,86 +14,122 @@ export class MetaRecorder {
     this.ensure()
   }
 
-  getAppName() {
+  getAppName(): AppName {
     return this.appName
   }
 
-  getPath(key: SyncType) {
+  private getStoragePath(key: SyncType): Uri {
     switch (key) {
-      case 'settings':
-        return getStorageFileUri('settings.json')
-      case 'extensions':
-        return getStorageFileUri('extensions.json')
-      case 'keybindings':
-        return getStorageFileUri('keybindings.json')
+      case 'settings': return getStorageFileUri('settings.json')
+      case 'extensions': return getStorageFileUri('extensions.json')
+      case 'keybindings': return getStorageFileUri('keybindings.json')
     }
   }
 
-  private async ensure() {
+  private async ensure(): Promise<void> {
     const hasStorage = await storageFileExists(this.filename)
     if (!hasStorage)
       await writeStorageFile(this.filename, jsonStringify(DEFAULT_SYNC_META))
   }
 
-  private async read() {
+  private async read(): Promise<SyncMeta> {
     await this.ensure()
     const content = await readStorageFile(this.filename)
     return jsonParse<SyncMeta>(content)
   }
 
-  private async write(meta: SyncMeta) {
-    const sortedMeta = Object.keys(meta).sort().reduce((acc, key) => {
+  private async write(meta: SyncMeta): Promise<void> {
+    // Keep keys sorted for stable diffs
+    const sorted = Object.keys(meta).sort().reduce((acc, key) => {
       acc[key as AppName] = meta[key as AppName]
       return acc
     }, {} as SyncMeta)
-    await writeStorageFile(this.filename, jsonStringify(sortedMeta))
+    await writeStorageFile(this.filename, jsonStringify(sorted))
   }
 
-  async getStorageMtime(key: SyncType) {
-    const path = this.getPath(key)
-    const state = await workspace.fs.stat(Uri.file(path.fsPath))
-    return state.mtime
+  async getStorageMtime(key: SyncType): Promise<number> {
+    const uri = this.getStoragePath(key)
+    const stat = await workspace.fs.stat(Uri.file(uri.fsPath))
+    return stat.mtime
   }
 
-  async getMtime(time: SyncType, app: AppName = this.appName) {
+  async getMtime(type: SyncType, app: AppName = this.appName): Promise<number | undefined> {
     const meta = await this.read()
-    return meta[app]?.[time]
+    return meta[app]?.[type]
   }
 
-  async updateMtime(time: SyncType, app: AppName = this.appName, mtime: number = new Date().getTime()) {
+  async updateMtime(type: SyncType, app: AppName = this.appName, mtime: number = Date.now()): Promise<void> {
     const meta = await this.read()
-    meta[app] = {
-      ...meta[app],
-      [time]: mtime,
-    }
+    meta[app] = { ...meta[app], [type]: mtime }
     await this.write(meta)
   }
 
-  async compareMtime(time: SyncType, storagePath: string, appPath: string) {
+  /**
+   * Compare the storage file's disk mtime against the last time *this IDE*
+   * uploaded.
+   *
+   * Returns:
+   *   1  → storage is newer (pull from storage)
+   *  -1  → local is newer  (push to storage)
+   *   0  → in sync
+   */
+  async compareMtime(type: SyncType, storagePath: string, appPath: string): Promise<1 | -1 | 0 | undefined> {
     try {
-      const storageMtime = await this.getStorageMtime(time)
-      const fileMtime = await this.getMtime(time, this.appName)
+      const storageMtime = await this.getStorageMtime(type)
+      const recordedMtime = await this.getMtime(type, this.appName)
 
-      logger.info(`compare ${time} mtime: storage - ${storageMtime} app - ${fileMtime}`)
+      logger.info(`compare ${type} mtime: storage=${storageMtime} recorded=${recordedMtime}`)
 
-      // first time to sync, consider app is newer
       if (!storageMtime)
-        return -1
-      // when no mtime is recorded, consider storage is newer
-      if (!fileMtime) {
-        await this.updateMtime(time)
-        return 1
+        return -1 // no storage file yet → push
+      if (!recordedMtime) {
+        await this.updateMtime(type)
+        return 1 // we've never synced → pull
       }
-      if (storageMtime > fileMtime)
-        return 1 // storage is newer
-      else if (storageMtime < fileMtime)
-        return -1 // app is newer
+      if (storageMtime > recordedMtime)
+        return 1
+      else if (storageMtime < recordedMtime)
+        return -1
       else
-        return 0 // same modification time
+        return 0
     }
     catch (error) {
-      logger.error(`Failed to compare ${time} mtime`, error)
+      logger.error(`Failed to compare ${type} mtime`, error)
       return await compareFsMtime(storagePath, appPath)
     }
+  }
+
+  // ─── Per-key settings timestamps (merge mode) ───────────────────────────────
+
+  /**
+   * Record a batch of settings key → timestamp updates for this IDE.
+   * Called after we detect which keys changed relative to the last snapshot.
+   */
+  async updateSettingsKeys(changedKeys: string[], timestamp: number = Date.now()): Promise<void> {
+    const meta = await this.read()
+    const appMeta: AppSyncMeta = meta[this.appName] ?? {}
+    const existing = appMeta.settingsKeys ?? {}
+    for (const key of changedKeys)
+      existing[key] = timestamp
+    appMeta.settingsKeys = existing
+    meta[this.appName] = appMeta
+    await this.write(meta)
+  }
+
+  /**
+   * Get the timestamp for a specific settings key as written by a particular IDE.
+   * Returns 0 if never recorded.
+   */
+  async getSettingsKeyMtime(key: string, app: AppName = this.appName): Promise<number> {
+    const meta = await this.read()
+    return meta[app]?.settingsKeys?.[key] ?? 0
+  }
+
+  /**
+   * Read the *full* SyncMeta — used by the merger to build the global key-level
+   * timestamp map across all IDEs.
+   */
+  async readAll(): Promise<SyncMeta> {
+    return this.read()
   }
 }

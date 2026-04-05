@@ -5,44 +5,67 @@ import { useLogger } from 'reactive-vscode'
 import { Uri, workspace } from 'vscode'
 import { displayName } from './generated/meta'
 
-export const logger = useLogger(displayName)
+import { appendFile, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import { config } from './config'
 
-function getConfigPaths(codeName: string, file: string): string[] {
-  switch (platform()) {
-    case 'win32':
-      return [
-        `${process.env.APPDATA}/${codeName}/User/${file}`,
-        `${process.env.USERPROFILE}/AppData/Roaming/${codeName}/User/${file}`,
-      ]
-    case 'darwin':
-      return [
-        `${process.env.HOME}/Library/Application Support/${codeName}/User/${file}`,
-        `${homedir()}/Library/Application Support/${codeName}/User/${file}`,
-      ]
-    default:
-      return [
-        `${process.env.HOME}/.config/${codeName}/User/${file}`,
-        `${process.env.XDG_CONFIG_HOME || `${homedir()}/.config`}/${codeName}/User/${file}`,
-        `${homedir()}/.config/${codeName}/User/${file}`,
-      ]
+const baseLogger = useLogger(displayName)
+
+async function writeLogToFile(level: string, message: string, ...args: any[]) {
+  try {
+    const storageDir = resolvePathUri(config.storagePath).fsPath
+    await mkdir(storageDir, { recursive: true })
+    const logPath = join(storageDir, 'vscode-forks-sync.log')
+    
+    const now = new Date()
+    const ts = now.toISOString().replace('T', ' ').slice(0, 19)
+    const { env } = await import('vscode')
+    
+    let fullMessage = `[${ts}] [${env.appName}] [${level}] ${message}`
+    if (args.length > 0) {
+      fullMessage += ' ' + args.map(a => 
+        a instanceof Error ? a.stack || a.message : 
+        typeof a === 'object' ? JSON.stringify(a) : String(a)
+      ).join(' ')
+    }
+    fullMessage += '\n'
+    
+    await appendFile(logPath, fullMessage, 'utf-8')
+  } catch (err) {
+    // Ignore log write errors
   }
 }
 
-export async function findConfigFile(codeName: string, file: string): Promise<string | undefined> {
-  const possiblePaths = getConfigPaths(codeName, file)
+export const logger = {
+  info: (message: string, ...args: any[]) => {
+    baseLogger.info(message, ...args)
+    writeLogToFile('INFO', message, ...args)
+  },
+  warn: (message: string, ...args: any[]) => {
+    baseLogger.warn(message, ...args)
+    writeLogToFile('WARN', message, ...args)
+  },
+  error: (message: string, ...args: any[]) => {
+    baseLogger.error(message, ...args)
+    writeLogToFile('ERROR', message, ...args)
+  },
+}
 
-  for (const path of possiblePaths) {
-    try {
-      await workspace.fs.stat(Uri.file(path))
-      logger.info(`Found ${file} at: ${path}`)
-      return path
-    }
-    catch {
-      continue
-    }
+import type { ExtensionContext } from 'vscode'
+
+export async function findConfigFile(ctx: ExtensionContext, file: string): Promise<string | undefined> {
+  const userDir = Uri.joinPath(ctx.globalStorageUri, '../../').fsPath
+  const path = join(userDir, file)
+  
+  try {
+    await workspace.fs.stat(Uri.file(path))
+    logger.info(`Found ${file} at: ${path}`)
+    return path
   }
-  logger.warn(`Could not find ${file} in any default location`)
-  return undefined
+  catch {
+    logger.warn(`Could not find ${file} at API location: ${path}`)
+    return undefined
+  }
 }
 
 export function resolvePathUri(path: string): Uri {
@@ -63,16 +86,12 @@ export async function compareFsMtime(path1: string, path2: string): Promise<1 | 
       workspace.fs.stat(Uri.file(path1)),
       workspace.fs.stat(Uri.file(path2)),
     ])
-
-    const mtime1 = stat1.mtime
-    const mtime2 = stat2.mtime
-
-    if (mtime1 > mtime2)
-      return 1 // path1 is newer
-    else if (mtime1 < mtime2)
-      return -1 // path2 is newer
+    if (stat1.mtime > stat2.mtime)
+      return 1
+    else if (stat1.mtime < stat2.mtime)
+      return -1
     else
-      return 0 // same modification time
+      return 0
   }
   catch (error) {
     logger.warn(`Failed to compare file modification times: ${error}`)

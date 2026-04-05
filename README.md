@@ -1,61 +1,38 @@
-# VSCode Crosside Sync
+# Fork Sync
 
-<a href="https://marketplace.visualstudio.com/items?itemName=octohash.crosside-sync" target="__blank"><img src="https://img.shields.io/visual-studio-marketplace/v/octohash.crosside-sync.svg?color=eee&amp;label=VS%20Code%20Marketplace&logo=visual-studio-code" alt="Visual Studio Marketplace Version" /></a>
-<a href="https://kermanx.github.io/reactive-vscode/" target="__blank"><img src="https://img.shields.io/badge/made_with-reactive--vscode-%23007ACC?style=flat&labelColor=%23229863"  alt="Made with reactive-vscode" /></a>
-
-A powerful VS Code extension that enables seamless synchronization of settings, keybindings, and extensions across VS Code and its forks (like Cursor) using local storage.
+**Synchronize settings, keybindings and extensions across VSCode and its forks** (Cursor, Windsurf, VSCodium, etc.) using a local shared directory — no GitHub Gist required.
 
 ## Features
 
-- <samp><b>Cross-IDE Sync</b></samp>: Synchronize settings, keybindings, and extensions between VS Code and its forks
-- <samp><b>Local Storage</b></samp>: Uses `~/.crosside-sync` directory for shared storage with full user control
-- <samp><b>Auto & Manual Sync</b></samp>: Automatic sync on startup with manual commands for settings, keybindings, and extensions
-- <samp><b>Smart Conflict Resolution</b></samp>: Compares modification times to preserve your latest changes
-- <samp><b>Extension Management</b></samp>: Sync extensions with filtering options to exclude specific ones
+- **Local-only sync** — all data lives in a folder you control (`~/.vscode-forks-sync` by default)
+- **Per-IDE sync timestamps** — each IDE independently tracks when it last synced each config type
+- **Smart settings merge** — choose between _override_ (last-write-wins by file) or _merge_ (per-key last-write-wins) modes
+- **Key blacklist & whitelist** — exclude machine-specific keys (e.g. `telemetry.*`) or sync only a curated set via glob patterns
+- **Failure-safe extension list** — extensions are tracked per-IDE; a failed install in one IDE never removes extensions contributed by another
+- **Configurable extension gallery** — defaults to [open-vsx.org](https://open-vsx.org) with VS Marketplace as fallback for VSIX downloads
+
+## Supported IDEs
+
+- Visual Studio Code
+- Visual Studio Code Insiders
+- Cursor
+- Windsurf / Windsurf Next
+- VSCodium / VSCodium Insiders
+- Antigravity
 
 ## Configuration
 
-<!-- configs -->
-
-| Key                                   | Description                                                         | Type      | Default              |
-| ------------------------------------- | ------------------------------------------------------------------- | --------- | -------------------- |
-| `crosside-sync.storagePath`           | The path to store the sync data share between VSCode and its forks. | `string`  | `"~/.crosside-sync"` |
-| `crosside-sync.autoSync`              | Whether to automatically sync settings.                             | `boolean` | `true`               |
-| `crosside-sync.promptOnAutoSync`      | Should show prompt before auto sync.                                | `boolean` | `true`               |
-| `crosside-sync.promptOnExtensionSync` | Should show prompt before sync extensions.                          | `boolean` | `true`               |
-| `crosside-sync.excludeExtensions`     | Extensions to exclude from sync.                                    | `array`   | `[]`                 |
-
-<!-- configs -->
-
-## Commands
-
-<!-- commands -->
-
-| Command                                  | Title                           |
-| ---------------------------------------- | ------------------------------- |
-| `octohash.crosside-sync.syncProfile`     | Crosside Sync: Sync Everything  |
-| `octohash.crosside-sync.syncSettings`    | Crosside Sync: Sync Settings    |
-| `octohash.crosside-sync.syncKeybindings` | Crosside Sync: Sync Keybindings |
-| `octohash.crosside-sync.syncExtensions`  | Crosside Sync: Sync Extensions  |
-
-<!-- commands -->
-
-## Supported Editors
-
-- VS Code
-- Cursor
-- Other VS Code-based editors (untested)
-
-## Why ?
-
-Many developers use multiple VS Code-based editors simultaneously - VS Code for general development, Cursor for AI-assisted coding, and other forks for specific workflows. Managing consistent settings, keybindings, and extensions across these different environments can be time-consuming and error-prone.
-
-Crosside Sync solves this problem by providing a unified synchronization system that works across all VS Code-based editors. Whether you're switching between VS Code and Cursor, or using multiple machines with different VS Code forks, your development environment stays consistent.
-
-## Credits
-
-This project is highly inspired by [Sync Everything](https://github.com/0x3at/synceverything).
+| Setting | Default | Description |
+|---|---|---|
+| `vscode-forks-sync.storagePath` | `~/.vscode-forks-sync` | Shared sync directory |
+| `vscode-forks-sync.autoSync` | `true` | Sync on startup |
+| `vscode-forks-sync.settings.mergeMode` | `merge` | `override` or `merge` |
+| `vscode-forks-sync.settings.excludeKeys` | `[...]` | Keys never synced (glob patterns) |
+| `vscode-forks-sync.settings.useIncludeKeys` | `false` | Enable whitelist mode |
+| `vscode-forks-sync.settings.includeKeys` | `[]` | Keys to sync in whitelist mode |
+| `vscode-forks-sync.extensions.excludeExtensions` | `[]` | Extensions never synced |
+| `vscode-forks-sync.extensionsGallery` | open-vsx | Gallery for VSIX downloads |
 
 ## License
 
-[MIT](./LICENSE) License © [jinghaihan](https://github.com/jinghaihan)
+[MIT](./LICENSE) License © [jinghaihan](https://github.com/jinghaihan), [lexatang](https://github.com/lexatang)
