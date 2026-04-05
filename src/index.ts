@@ -7,6 +7,9 @@ import { syncExtensions, syncKeybindings, syncProfile, syncSettings } from './sy
 import { ConfigWatcher } from './watcher'
 
 const { activate, deactivate } = defineExtension(async (ctx: ExtensionContext) => {
+  const { logger } = await import('./utils')
+  logger.info('Fork Sync activated')
+
   const recorder = new MetaRecorder()
   const configWatcher = new ConfigWatcher(ctx, recorder)
 

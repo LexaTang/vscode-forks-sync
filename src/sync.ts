@@ -117,6 +117,7 @@ export async function syncProfile(
   if (!shouldSync)
     return
 
+  logger.info('Profile: sync started')
   await ensureStorageDirectory()
 
   const opts = { ...options, silent: true }
@@ -129,6 +130,7 @@ export async function syncProfile(
 
   if (!silent)
     window.showInformationMessage(`${displayName}: Config updated`)
+  logger.info('Profile: sync complete')
 }
 
 export async function syncSettings(
@@ -161,6 +163,7 @@ export async function syncSettings(
 
     if (!silent)
       window.showInformationMessage(`${displayName}: Settings file initialized`)
+    logger.info('Settings: initialized storage with local keys')
     return
   }
 
@@ -224,6 +227,7 @@ export async function syncKeybindings(
     await recorder.updateMtime('keybindings')
     if (!silent)
       window.showInformationMessage(`${displayName}: Keybindings file initialized`)
+    logger.info('Keybindings: initialized storage with local keys')
     return
   }
 
@@ -266,6 +270,7 @@ export async function syncExtensions(
     await recorder.updateMtime('extensions')
     if (!silent)
       window.showInformationMessage(`${displayName}: Extension list initialized`)
+    logger.info(`Extensions: initialized storage with local list for ${currentIde}`)
     return
   }
 

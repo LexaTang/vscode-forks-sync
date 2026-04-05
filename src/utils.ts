@@ -9,7 +9,12 @@ import { appendFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { config } from './config'
 
-const baseLogger = useLogger(displayName)
+let _baseLogger: ReturnType<typeof useLogger> | undefined
+function getBaseLogger() {
+  if (!_baseLogger)
+    _baseLogger = useLogger(displayName)
+  return _baseLogger
+}
 
 async function writeLogToFile(level: string, message: string, ...args: any[]) {
   try {
@@ -32,21 +37,21 @@ async function writeLogToFile(level: string, message: string, ...args: any[]) {
     
     await appendFile(logPath, fullMessage, 'utf-8')
   } catch (err) {
-    // Ignore log write errors
+    console.error('Failed to write to log file:', err)
   }
 }
 
 export const logger = {
   info: (message: string, ...args: any[]) => {
-    baseLogger.info(message, ...args)
+    getBaseLogger().info(message, ...args)
     writeLogToFile('INFO', message, ...args)
   },
   warn: (message: string, ...args: any[]) => {
-    baseLogger.warn(message, ...args)
+    getBaseLogger().warn(message, ...args)
     writeLogToFile('WARN', message, ...args)
   },
   error: (message: string, ...args: any[]) => {
-    baseLogger.error(message, ...args)
+    getBaseLogger().error(message, ...args)
     writeLogToFile('ERROR', message, ...args)
   },
 }
