@@ -4,6 +4,7 @@ trustPolicy: no-downgrade
 packages: []
 
 catalog:
+  '@antfu/ni': ^30.0.0
   '@types/micromatch': ^4.0.10
   micromatch: ^4.0.8
 
@@ -36,6 +37,9 @@ catalogs:
 
   network:
     ofetch: ^1.5.1
+
+  test:
+    vitest: ^3.0.7
 
   tsc:
     typescript: ^5.9.3

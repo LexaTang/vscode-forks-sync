@@ -178,10 +178,12 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "update": "taze major -r",
-    "release": "pnpm lint && pnpm typecheck && bumpp"
+    "release": "pnpm lint && pnpm typecheck && bumpp",
+    "test": "vitest"
   },
   "devDependencies": {
     "@antfu/eslint-config": "catalog:lint",
+    "@antfu/ni": "catalog:",
     "@types/micromatch": "catalog:",
     "@types/node": "catalog:conflicts_types_h25_5_2",
     "@types/vscode": "1.90.0",
@@ -196,6 +198,7 @@
     "taze": "catalog:conflicts_cli_h19_11_0",
     "tsdown": "catalog:build",
     "typescript": "catalog:tsc",
+    "vitest": "catalog:test",
     "vscode-ext-gen": "catalog:conflicts_vscode_h1_6_0"
   }
 }
